@@ -7,6 +7,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 #define SIZE 0x2000
 
 long int process(int, const char*, char*);
@@ -20,6 +22,9 @@ int main(int argc, char** argv) {
     char* url = NULL;
     char* data = NULL;
     char* buffer = NULL;
+            SSL_CTX* _ssl_ctx = NULL;
+        SSL* _ssl = NULL;
+
 
     // if (argc >= 4) {
     //     url = argv[1];
@@ -46,19 +51,27 @@ int main(int argc, char** argv) {
         exit(EXIT_FAILURE);
         close(server_fd);
     }
-    if (listen(server_fd, 1) < 0) {
+    if (listen(server_fd, 5) < 0) {
         perror("listen");
         free(buffer);
         free(data);
         exit(EXIT_FAILURE);
         close(server_fd);
     }
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 3; i++) {
         struct sockaddr_in client_addr = {0};
         socklen_t len = sizeof(struct sockaddr);
         int client_fd = 0;
         char* url = (char*) malloc(sizeof(char) * SIZE);
         char* _buffer = (char*) malloc(sizeof(char) * SIZE);
+        SSL_library_init();
+        OpenSSL_add_all_algorithms();
+        SSL_CTX* ssl_ctx = NULL;
+        SSL* ssl = NULL;
+        _ssl_ctx = SSL_CTX_new(TLS_server_method());
+        SSL_CTX_set_verify(_ssl_ctx, SSL_VERIFY_PEER, NULL);
+        SSL_CTX_set_default_verify_paths(_ssl_ctx);
+
 
         memset(&client_addr, '\0', sizeof(struct sockaddr));
         memset(data, '\0', SIZE);
@@ -75,10 +88,10 @@ int main(int argc, char** argv) {
             else
                 break;
         }
+        // printf("First reponse: \n%s\n", buffer);
         memcpy(_buffer, buffer, SIZE);
         char* s = strchr(_buffer, ' ') + 1;
         *(s + (strchr(s + 1, ' ') - s)) = '\0';
-        puts(s);
         if (strstr(s, "http://")) {
             s += 7;
             char* p = NULL;
@@ -92,80 +105,204 @@ int main(int argc, char** argv) {
             }
         } else {
             strcpy(url, s);
-            // s += 9;
-            // puts(s);
-            // char* p = NULL;
-            // if ((p = strchr(s, '/'))) {
-            //     strncpy(url, s, p - s);
-            //     strcat(url, ":443");
-            //     strcat(url, p);
-            // } else {
-            //     strncpy(url, s, strlen(s));
-            //     strcat(url, ":443");
-            // }
         }
         printf("S1: %s\n\n\n", url);
-        if ((fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
-            perror("Create socket for zl");
-            close(client_fd);
-            free(url);
-            free(_buffer);
-            close(fd);
-            break;
-        };
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(443);
-        inet_pton(AF_INET, "153.3.236.22", &(addr.sin_addr.s_addr));
-        if ((connect(fd, (struct sockaddr *)&addr, sizeof(addr))) < 0) {
-            perror("Connect zl");
-            close(client_fd);
-            free(url);
-            free(_buffer);
-            close(fd);
-            break;
-        }
-        // printf("Return: %d\n", setNonBlocking(fd));
-        memset(data, '\0', SIZE);
-        memset(_buffer, '\0', SIZE);
-        snprintf(data, SIZE, "CONNECT %sHTTP/1.1\r\nHost: 153.3.236.22\r\nUser-Agent: baiduboxapp\r\nX-T5-Auth: 683556443\r\nProxy-Connection: Keep-Alive\r\nConnection: Keep-Alive\r\n\r\n", url);
-        for (int i = 0, total = 0; (i = write(fd, data, strlen(data))); total += i > 0 ? i : 0) {
-            if (i == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
-                sleep(1);
-            else
-                break;
-        }
-        for (int i = 0, total = 0; (i = read(fd, _buffer, SIZE)); total += i > 0 ? i : 0) {
-            if (i == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
-                sleep(1);
-            else
-                break;
-        }
-        puts(_buffer);
-        memset(_buffer, '\0', SIZE);
-        for (int i = 0, total = 0; (i = write(fd, buffer, strlen(buffer))); total += i > 0 ? i : 0) {
-            if (i == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
-                sleep(1);
-            else
-                break;
-        }
-        puts(buffer);
-        for (int i = 0, total = 0; (i = read(fd, _buffer, SIZE)); total += i > 0 ? i : 0) {
-            if (i == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
-                sleep(1);
-            else
-                break;
-        }
-        puts(_buffer);
-        for (int i = 0, total = 0; (i = write(client_fd, _buffer, strlen(_buffer))); total += i > 0 ? i : 0) {
-            if (i == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
-                sleep(1);
-            else
-                break;
-        }
+        strcpy(data, "HTTP/1.1 200 Connection Established\r\n\r\n");
+        printf("Sended: %zd bytes\n", write(client_fd, data, strlen(data)));
+        // if (!(ssl_ctx = SSL_CTX_new(TLS_client_method())))
+        //     fprintf(stderr, "%s\n", "Create OPENSSL context failure.");
+        // if (!(ssl = SSL_new(ssl_ctx)))
+        //     fprintf(stderr, "%s\n", "Create OPENSSL failure.");
+
+        // if (!(_ssl_ctx = SSL_CTX_new(TLSv1_2_server_method())))
+        //     fprintf(stderr, "%s\n", "Create OPENSSL context failure.");
+        // SSL_CTX_set_options(_ssl_ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
+        // 创建 SSL 上下文
+        // SSL_CTX_set_cipher_list(_ssl_ctx, "ALL:!aNULL:!eNULL");
+// if (_ssl_ctx == NULL) {
+//     ERR_print_errors_fp(stderr);
+//     return -1;
+// }
+
+// // 设置支持的协议版本为 TLSv1.3
+// if (SSL_CTX_set_min_proto_version(_ssl_ctx, TLS1_3_VERSION) != 1) {
+//     ERR_print_errors_fp(stderr);
+//     SSL_CTX_free(_ssl_ctx);
+//     return -1;
+// }
+
+        // SSL_CTX_load_verify_locations(_ssl_ctx, NULL, "/etc/ssl/certs");
+        if (!(_ssl = SSL_new(_ssl_ctx)))
+            fprintf(stderr, "%s\n", "Create OPENSSL failure.");
+
+        SSL_set_fd(_ssl, client_fd);
+        printf("Accept return: %d\n", SSL_accept(_ssl));
+        //     fprintf(stderr, "%s\n", "1: SSL connect to address failure.");
+        //     perror("ssl connect");
+        // }
+        printf("Sended: %d\n", SSL_write(_ssl, "HTTP/1.1 200 Connection Established\r\n\r\n", 40));
+
+        
+        // if ((fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
+        //     perror("Create socket for zl");
+        //     close(client_fd);
+        //     free(url);
+        //     free(_buffer);
+        //     close(fd);
+        //     break;
+        // };
+
+        // addr.sin_family = AF_INET;
+        // addr.sin_port = htons(443);
+        // inet_pton(AF_INET, "153.3.236.22", &(addr.sin_addr.s_addr));
+        // if ((connect(fd, (struct sockaddr *)&addr, sizeof(addr))) < 0) {
+        //     perror("Connect zl");
+        //     close(client_fd);
+        //     free(url);
+        //     free(_buffer);
+        //     close(fd);
+        //     break;
+        // }
+        // // printf("Return: %d\n", setNonBlocking(fd));
+        // memset(data, '\0', SIZE);
+        // memset(_buffer, '\0', SIZE);
+        // snprintf(data, SIZE, "CONNECT %sHTTP/1.1\r\nHost: 153.3.236.22\r\nUser-Agent: baiduboxapp\r\nX-T5-Auth: 683556443\r\nProxy-Connection: Keep-Alive\r\nConnection: Keep-Alive\r\n\r\n", url);
+        // puts(data);
+        // for (int i = 0, total = 0; (i = write(fd, data, strlen(data))); total += i > 0 ? i : 0) {
+        //     if (i == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        //         sleep(1);
+        //     else
+        //         break;
+        // }
+        // for (int i = 0, total = 0; (i = read(fd, _buffer, SIZE)); total += i > 0 ? i : 0) {
+        //     if (i == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        //         sleep(1);
+        //     else
+        //         break;
+        // }
+        // // puts(_buffer);
+        // if (!strstr(buffer, "CONNECT")) {
+            // for (int i = 0, total = 0; (i = write(client_fd, "HTTP/1.1 200 Connection Established\r\n\r\n", 40)); total += i > 0 ? i : 0) {
+            //     if (i == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            //         printf("%d ", i);
+            //     else
+            //         break;
+            // }
+            // printf("Sended: %d\n", );
+            // puts("?");
+            // memset(buffer, '\0', SIZE);
+            // for (int i = 0, total = 0; (i = SSL_read(_ssl, buffer + total, SIZE - total)); total += i > 0 ? i : 0) {
+            //     if (i == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            //         printf("%d ", total);
+            //     else
+            //         break;
+            // }
+           
+            // // printf("Received %d bytes\n", SSL_read(_ssl, buffer, SIZE));
+            // puts(buffer);
+
+
+            
+
+// int result = SSL_write(_ssl, _buffer, strlen(_buffer));
+// if (result <= 0) {
+//     int error = SSL_get_error(ssl, result);
+//     switch (error) {
+//         case SSL_ERROR_WANT_READ:
+//             puts("需要更多读操作才能继续");
+//             break;
+//         case SSL_ERROR_WANT_WRITE:
+//             puts("需要更多写操作才能继续");
+//             break;
+//         case SSL_ERROR_ZERO_RETURN:
+//             puts("对方已关闭连接");
+//             break;
+//         case SSL_ERROR_SYSCALL:
+//             // 发生系统调用错误
+//             perror("System call error");
+//             break;
+//         case SSL_ERROR_SSL:
+//             // 发生 SSL/TLS 错误
+//             puts("THIS");
+//             ERR_print_errors_fp(stderr);
+//             break;
+//         default:
+//             puts("其他错误");
+//             break;
+//     }
+// }
+            // SSL_get_error(ssl, -1);
+            // perror("send");
+            
+
+            // printf("Received %d bytes\n", SSL_read(_ssl, buffer, SIZE));
+
+            // printf("Received %d bytes\n", SSL_read(_ssl, buffer, SIZE));
+
+            // printf("Received %d bytes\n", SSL_read(_ssl, buffer, SIZE));
+
+            // printf("Received %d bytes\n", SSL_read(_ssl, buffer, SIZE));
+
+            // printf("Received %d bytes\n", SSL_read(_ssl, buffer, SIZE));
+
+            // printf("Received %d bytes\n", SSL_read(_ssl, buffer, SIZE));
+
+            // for (int i = 0, total = 0; (i = read(client_fd, buffer, SIZE)); total += i > 0 ? i : 0) {
+            //     if (i == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            //         printf("%d ", total);
+            //     else
+            //         break;
+            // }
+            // // memset(buffer, '\0', SIZE);
+            // for (int i = 0, total = 0; (i = read(client_fd, buffer, SIZE)); total += i > 0 ? i : 0) {
+            //     if (i == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            //         printf("%d ", total);
+            //     else
+            //         break;
+            // }
+
+        // }
+        // memset(_buffer, '\0', SIZE);
+        // SSL_set_fd(ssl, fd);
+        // if (SSL_connect(ssl) < 0) {
+        //     fprintf(stderr, "%s\n", "2: SSL connect to address failure.");
+        //     perror("ssl connect");
+        // }
+        
+        // puts("Success");
+        // puts(buffer);
+        // memset(buffer, '\0', SIZE);
+        // strcpy(buffer, "GET /get HTTP/1.1\r\nHost: httpbin.org\r\nUser-Agent: C/TESTER\r\n\r\n");
+        // for (int i = 0, total = 0; (i = SSL_write(ssl, buffer, strlen(buffer))); total += i > 0 ? i : 0) {
+        //     if (i == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        //         sleep(1);
+        //     else
+        //         break;
+        // }
+        // for (int i = 0, total = 0; (i = SSL_read(ssl, _buffer + total, SIZE - total)); total += i > 0 ? i : 0) {
+        //     if (i == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        //         sleep(1);
+        //     else
+        //         break;
+        // }
+        // puts(_buffer);
+        // for (int i = 0, total = 0; (i = write(client_fd, _buffer, strlen(_buffer))); total += i > 0 ? i : 0) {
+        //     if (i == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        //         sleep(1);
+        //     else
+        //         break;
+        // }
+        // SSL_shutdown(ssl);
+        // SSL_free(ssl);
+        // SSL_CTX_free(ssl_ctx);
+
+        SSL_shutdown(_ssl);
+        SSL_free(_ssl);
+        SSL_CTX_free(_ssl_ctx);
         close(client_fd);
         free(url);
         free(_buffer);
-        close(fd);
+        // close(fd);
     }
 
     // snprintf(data, SIZE, "CONNECT %s:%uHTTP/1.1\r\nHost: 153.3.236.22\r\nUser-Agent: baiduboxapp\r\nX-T5-Auth: 683556443\r\nProxy-Connection: Keep-Alive\r\nConnection: Keep-Alive\r\n\r\n", url, port);
