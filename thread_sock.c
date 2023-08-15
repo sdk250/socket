@@ -123,7 +123,7 @@ int main(int argc, char** argv) {
 }
 
 void usage(const char* argv, int ret) {
-    printf("Useage of %s:\n\t-p\t<port for running>\n\t-l\tshow running log\n\t-d\tstart daemon service\n\t-h\tshow this message\n", argv);
+    printf("Usage of %s:\n\t-p\t<port for running>\n\t-l\tshow running log\n\t-d\tstart daemon service\n\t-h\tshow this message\n", argv);
     exit(ret);
 }
 
