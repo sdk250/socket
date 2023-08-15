@@ -11,7 +11,7 @@
 #include <sys/wait.h>
 #include <pthread.h>
 #include <signal.h>
-#define SIZE 0xF00
+#define SIZE 0xFFF
 #define U_TIMEOUT 500000
 #define TIMEOUT 3
 #define SERVER_ADDR "153.3.236.22"
@@ -20,10 +20,11 @@ long int recv_headers(int, char*, size_t);
 int setNonBlocking(int);
 void* handle_connection(void *);
 void set_socket_timeout(int, unsigned long int, unsigned int);
-void* any1(void*);
-void* any2(void*);
+void* client_to_server(void*);
+void* server_to_client(void*);
 void main_loop(int);
-pthread_attr_t attr;
+void usage(const char *, int);
+pthread_attr_t attr = {0};
 int LOG = 0;
 
 struct arg {
@@ -39,11 +40,12 @@ int main(int argc, char** argv) {
     int on = 1;
     int opt = 0;
     int daemon = 0;
-    unsigned int port = 0;
+    unsigned int port = 8080;
     pid_t pid = 0;
-    char ss[] = "p:dlh";
 
-    for (;(opt = getopt(argc, argv, ss)) != -1;) {
+    if (argc == 1)
+        usage(*argv, EXIT_FAILURE);
+    for (;(opt = getopt(argc, argv, ":p:dlh")) != -1;) {
         switch(opt) {
             case 'p':
                 port = atoi(optarg);
@@ -55,11 +57,18 @@ int main(int argc, char** argv) {
                 LOG = 1;
                 break;
             case 'h':
-                printf("%s\n", "No help.");
-                exit(EXIT_SUCCESS);
+                usage(*argv, EXIT_SUCCESS);
                 break;
+            case ':':
+                printf("Missing argument after: -%c\n", optopt);
+                usage(*argv, EXIT_FAILURE);
+                break;
+            case '?':
+                printf("Invalid argument: -%c\n", optopt);
+                usage(*argv, EXIT_FAILURE);
+                // break;
             default:
-                exit(EXIT_FAILURE);
+                usage(*argv, EXIT_FAILURE);
         }
     }
 
@@ -99,17 +108,23 @@ int main(int argc, char** argv) {
             close(STDOUT_FILENO);
             close(STDERR_FILENO);
             main_loop(local_fd);
+            close(local_fd);
         } else {
             printf("PID of %s is %d\n", *argv, pid);
             close(local_fd);
         }
-    } else
+    } else {
         main_loop(local_fd);
+        close(local_fd);
+    }
 
-    close(local_fd);
     puts("Done.");
-
     return 0;
+}
+
+void usage(const char* argv, int ret) {
+    printf("Useage of %s:\n\t-p\t<port for running>\n\t-l\tshow running log\n\t-d\tstart daemon service\n\t-h\tshow this message\n", argv);
+    exit(ret);
 }
 
 void main_loop(int local_fd) {
@@ -124,10 +139,9 @@ void main_loop(int local_fd) {
         pthread_create(&tid, &attr, handle_connection, client_fd);
     }
 }
+
 void set_socket_timeout(int fd, unsigned long int usec, unsigned int sec) {
     struct timeval tv = {usec, sec};
-    // tv.tv_usec = usec;
-    // tv.tv_sec = sec;
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (void*) &tv, sizeof(struct timeval));
     tv.tv_usec = usec;
     tv.tv_sec = sec;
@@ -246,10 +260,10 @@ void* handle_connection(void* _fd) {
     send(server_fd, _buffer, strlen(_buffer), MSG_NOSIGNAL);
     recv_headers(server_fd, _buffer, SIZE);
 
-    struct arg arg1 = {client_fd, server_fd, buffer, http};
-    pthread_create(&t1, &attr, any1, &arg1);
+    struct arg arg_ = {client_fd, server_fd, buffer, http};
+    pthread_create(&t1, &attr, client_to_server, &arg_);
     struct arg arg2 = {server_fd, client_fd, _buffer, http};
-    pthread_create(&t2, &attr, any2, &arg2);
+    pthread_create(&t2, &attr, server_to_client, &arg2);
 
     pthread_join(t1, NULL);
     pthread_join(t2, NULL);
@@ -262,72 +276,52 @@ void* handle_connection(void* _fd) {
     return NULL;
 }
 
-void* any1(void* par) {
-    struct arg* arg1 = (struct arg*) par;
-    if (strlen(arg1->buf) == 0) {
+void* client_to_server(void* par) {
+    struct arg* arg_ = (struct arg*) par;
+    if (strlen(arg_->buf) == 0) {
         fprintf(stderr, "%s\n", "It's \x1b[31mNULL\x1b[0m");
         pthread_exit(NULL);
         return NULL;
     }
-    // char* p = strchr(arg1->buf, ' ');
-    if (arg1->http) {
-        // puts(arg1->buf);
-        // if ((p = strstr(arg1->buf, "http://"))) {
-            // char *p1 = NULL;
-            // if ((p1 = strchr(p + 7, '/'))) {
-                // size_t len = strchr(p1, ' ') - p1;
-                // char buffer[SIZE] = {0};
-                // strncpy(buffer, arg1->buf, p - arg1->buf);
-                // *(p1 + len) = '\0';
-                // strcat(buffer, p1);
-                // *(p1 + len) = ' ';
-                // strcat(buffer, p1 + len);
-                // memset(arg1->buf, '\0', SIZE);
-                // memcpy(arg1->buf, buffer, SIZE);
-            // } else {
-                // strcat(p, "/");
-                // strcat(p + 1, strchr(p, ' '));
-            // }
-        // }
-        // puts(arg1->buf);
-        send(arg1->dest, arg1->buf, strlen(arg1->buf), MSG_NOSIGNAL);
+    if (arg_->http) {
+        send(arg_->dest, arg_->buf, strlen(arg_->buf), MSG_NOSIGNAL);
     }
-    memset(arg1->buf, '\0', SIZE);
-    for (long int n = 0; (n = recv(arg1->source, arg1->buf, SIZE, 0));) {
+    memset(arg_->buf, '\0', SIZE);
+    for (long int n = 0; (n = recv(arg_->source, arg_->buf, SIZE, 0));) {
         if (n == -1) {
             if (errno == EINTR || errno == EAGAIN)
                 continue;
             else
                 break;
         }
-        send(arg1->dest, arg1->buf, n, MSG_NOSIGNAL);
+        send(arg_->dest, arg_->buf, n, MSG_NOSIGNAL);
     }
-    shutdown(arg1->dest, SHUT_RDWR);
-    shutdown(arg1->source, SHUT_RDWR);
+    shutdown(arg_->dest, SHUT_RDWR);
+    shutdown(arg_->source, SHUT_RDWR);
     pthread_exit(NULL);
     return NULL;
 }
 
-void* any2(void* par) {
-    struct arg* arg1 = (struct arg*) par;
-    if (!arg1->http)
-        send(arg1->dest, arg1->buf, strlen(arg1->buf), MSG_NOSIGNAL);
+void* server_to_client(void* par) {
+    struct arg* arg_ = (struct arg*) par;
+    if (!arg_->http)
+        send(arg_->dest, arg_->buf, strlen(arg_->buf), MSG_NOSIGNAL);
     else
-        if (strcmp(arg1->buf, "HTTP/1.1 200 Connection established\r\n\r\n"))
-            send(arg1->dest, arg1->buf, strlen(arg1->buf), MSG_NOSIGNAL);
-    memset(arg1->buf, '\0', SIZE);
+        if (strcmp(arg_->buf, "HTTP/1.1 200 Connection established\r\n\r\n"))
+            send(arg_->dest, arg_->buf, strlen(arg_->buf), MSG_NOSIGNAL);
+    memset(arg_->buf, '\0', SIZE);
 
-    for (long int n = 0; (n = recv(arg1->source, arg1->buf, SIZE, 0)) > 0;) {
+    for (long int n = 0; (n = recv(arg_->source, arg_->buf, SIZE, 0)) > 0;) {
         if (n == -1) {
             if (errno == EINTR || errno == EAGAIN)
                 continue;
             else
                 break;
         }
-        send(arg1->dest, arg1->buf, n, MSG_NOSIGNAL);
+        send(arg_->dest, arg_->buf, n, MSG_NOSIGNAL);
     }
-    shutdown(arg1->dest, SHUT_RDWR);
-    shutdown(arg1->source, SHUT_RDWR);
+    shutdown(arg_->dest, SHUT_RDWR);
+    shutdown(arg_->source, SHUT_RDWR);
     pthread_exit(NULL);
     return NULL;
 }
