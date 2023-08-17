@@ -1,10 +1,14 @@
 # Complie
 ```shell
-clang -m64 -O3 -Wall -lpthread -o thread_sock thread_sock.c
+make
+```
+If is not working, please try:
+```shell
+clang -m64 -O3 -Wall -lpthread -o thread_socket thread_socket.c
 ```
 # Usage
 ```shell
-./thread_sock -h
+./thread_socket -h
 Usage of ./thread_sock:
         -p      <port for running>
         -l      show running log
