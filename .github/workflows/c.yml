@@ -22,10 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: softprops/action-gh-release@v1
     - name: Create release
-    - with:
-      files: thread_socket
-      token:
-        "sdk250.."
+      uses: softprops/action-gh-release@v1
+      id: create_release
+      with:
+        files: thread_socket
+        token:
+          "sdk250.."
 
