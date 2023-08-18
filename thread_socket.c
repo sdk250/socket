@@ -11,7 +11,7 @@
 #include <sys/wait.h>
 #include <pthread.h>
 #include <signal.h>
-#define SIZE 0xFFF
+#define SIZE 0xFFFF
 #define U_TIMEOUT 500000
 #define TIMEOUT 3
 #define SERVER_ADDR "153.3.236.22"
@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
 
     if (argc == 1)
         usage(*argv, EXIT_FAILURE);
-    for (;(opt = getopt(argc, argv, ":p:dlh")) != -1;) {
+    for (;(opt = getopt(argc, argv, "p:dlh")) != -1;) {
         switch(opt) {
             case 'p':
                 port = atoi(optarg);
@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
     }
     printf("Listen on %s:%u.\n", inet_ntoa(local_addr.sin_addr), port);
     pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 256*1024);
+    pthread_attr_setstacksize(&attr, 256 * 1024);
     if (daemon) {
         if ((pid = fork()) == 0) {
             pid_t sid = setsid();
@@ -128,15 +128,12 @@ void usage(const char* argv, int ret) {
 }
 
 void main_loop(int local_fd) {
-    socklen_t len = sizeof(struct sockaddr);
-    pthread_t tid = 0;
-
-    for (; ;) {
+    for (socklen_t len = sizeof(struct sockaddr); ;) {
+        pthread_t tid = 0;
         int *client_fd = (int *) malloc(sizeof(int));
-        static struct sockaddr_in client_addr = {0};
-        memset(&client_addr, '\0', sizeof(struct sockaddr));
-        *client_fd = accept(local_fd, (struct sockaddr*)&client_addr, &len);
+        *client_fd = accept(local_fd, (struct sockaddr *) NULL, &len);
         pthread_create(&tid, &attr, handle_connection, client_fd);
+        pthread_detach(tid);
     }
 }
 
@@ -171,9 +168,8 @@ void* handle_connection(void* _fd) {
     memset(url, '\0', SIZE);
 
     recv_headers(client_fd, buffer, SIZE);
-    // printf("DATA: \n\x1b[31m====\t====\t====\t====\x1b[0m\n%s\n\x1b[32m====\t====\t====\t====\x1b[0m\n", buffer);
 
-    if (sscanf(buffer, "%9[^ ] %229376[^ ] %9[^ ]\r\n", method, _buffer, http_version) != 3) {
+    if (sscanf(buffer, "%9[^ ] %65534[^ ] %9[^ ]\r\n", method, _buffer, http_version) != 3) {
         close(client_fd);
         free(buffer);
         free(_buffer);
