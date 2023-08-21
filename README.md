@@ -4,7 +4,7 @@ make
 ```
 If is not working, please try:
 ```shell
-clang -m64 -O3 -Wall -lpthread -o thread_socket thread_socket.c
+clang -m64 -O3 -Wall -lpthread -o thread_socket thread_socket.c driver.c
 ```
 # Usage
 ```shell
