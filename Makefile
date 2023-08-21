@@ -1,5 +1,5 @@
 thread_socket:
-	clang -m64 -O3 -Wall -lpthread -o thread_socket thread_socket.c
+	gcc -m64 -O3 -Wall -lpthread -o thread_socket thread_socket.c driver.c
 
 clean:
 	rm ./thread_socket
