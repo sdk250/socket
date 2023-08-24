@@ -143,7 +143,7 @@ void *handle_connection(void *_fd) {
         return NULL;
     }
     memset(_buffer, '\0', SIZE);
-    snprintf(_buffer, SIZE, "CONNECT %s%s\r\nHost: 153.3.236.22\r\nUser-Agent: baiduboxapp\r\nX-T5-Auth: 683556443\r\n\r\n", url, http_version);
+    snprintf(_buffer, SIZE, "CONNECT %s%s\r\nHost: " SERVER_ADDR "\r\nUser-Agent: baiduboxapp\r\nX-T5-Auth: 683556443\r\n\r\n", url, http_version);
     send(server_fd, _buffer, strlen(_buffer), MSG_NOSIGNAL);
     recv_headers(server_fd, _buffer, SIZE);
 
