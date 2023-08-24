@@ -1,5 +1,7 @@
+CFLAGS = -m64 -O3 -Wall -lpthread -fPIE -fstack-protector-all
+
 thread_socket:
-	gcc -m64 -O3 -Wall -lpthread -o thread_socket thread_socket.c driver.c
+	gcc $(CFLAGS) -o $(@) thread_socket.c driver.c
 
 clean:
 	rm ./thread_socket
