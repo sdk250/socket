@@ -6,8 +6,7 @@ void signal_terminate(int sign) {
 }
 
 void usage(const char *argv, int ret) {
-    printf("Usage of %s:\n\t-p\t<port for running>\n\t-l\tshow running log\n\t-d\tstart daemon service\n\t-h\tshow this message\n", argv);
-    puts("\x1b[92mDone.\x1b[0m");
+    printf("Usage of %s:\n\t-p\t<PORT>\n\t\tSet PORT while running\n\t-l\tShow running log\n\t-u\t<UID>\n\t\tSet UID while running\n\t-d\tStart daemon service\n\t-h\tShow this message\n", argv);
     exit(ret);
 }
 

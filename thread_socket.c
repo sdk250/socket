@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
 
     if (argc == 1)
         usage(*argv, EXIT_FAILURE);
-    for (;(opt = getopt(argc, argv, "p:dlh")) != -1;) {
+    for (;(opt = getopt(argc, argv, "p:u:dlh")) != -1;) {
         switch(opt) {
             case 'p':
                 port = atoi(optarg);
@@ -25,6 +25,10 @@ int main(int argc, char **argv) {
                 break;
             case 'l':
                 LOG = 1;
+                break;
+            case 'u':
+                if (setuid(atoi(optarg)))
+                    perror("Setuid error");
                 break;
             case 'h':
                 usage(*argv, EXIT_SUCCESS);
