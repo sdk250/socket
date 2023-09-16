@@ -13,11 +13,17 @@
 #define SIZE 0xFFFF
 #define U_TIMEOUT 500000
 #define TIMEOUT 3
-#define SERVER_ADDR "153.3.236.22"
+#define SERVER_ADDR "157.255.72.18"
 
 extern pthread_attr_t attr;
 extern int LOG;
 extern int local_fd;
+
+struct http_header {
+	char *data;
+	struct http_header *prev;
+	struct http_header *next;
+};
 
 struct arg {
     int source;
@@ -26,11 +32,6 @@ struct arg {
     int http;
 };
 
-struct http_header {
-	char *data;
-	struct http_header *prev;
-	struct http_header *next;
-};
 
 long int recv_headers(int, struct http_header *, size_t);
 int setNonBlocking(int);
