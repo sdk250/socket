@@ -49,6 +49,7 @@ void *handle_connection(void *_fd) {
     pthread_t t1 = 0, t2 = 0;
     int http = -1;
     char *p = NULL;
+    struct http_header *root = NULL;
 
     set_socket_timeout(client_fd, 0, TIMEOUT);
     free((int *) _fd);
@@ -57,6 +58,7 @@ void *handle_connection(void *_fd) {
     _buffer = (char *) malloc(sizeof(char) * SIZE);
     url = (char *) malloc(sizeof(char) * SIZE);
     data = (char *) malloc(sizeof(char) * SIZE);
+    root = (struct http_header *) malloc(sizeof(struct http_header));
 
     if (!buffer || !_buffer || !url) {
         close(client_fd);
@@ -73,7 +75,6 @@ void *handle_connection(void *_fd) {
     memset(url, '\0', SIZE);
     memset(data, '\0', SIZE);
 
-    struct http_header *root = (struct http_header *) malloc(sizeof(struct http_header));
     recv_headers(client_fd, root, SIZE);
 
     if (sscanf(root->data, "%9[^ ] %65534[^ ] %9[^ ]\r\n", method, _buffer, http_version) != 3) {
@@ -131,9 +132,9 @@ void *handle_connection(void *_fd) {
                 free(temp->data);
                 temp->data = tmp;
             } else {
-                add_header(root, "User-Agent: baiduboxapp\r\n", 27);
+                add_header(root, "User-Agent: baiduboxapp\r\n", 28);
             }
-            add_header(root, "X-T5-Auth: 1109293052\r\n", 25);
+            add_header(root, "X-T5-Auth: 1109293052\r\n", 26);
         } else {
             if ((p = strstr(buffer, "Host: "))) {
                 p += 6;
