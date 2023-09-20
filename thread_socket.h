@@ -42,4 +42,4 @@ void *server_to_client(void *);
 void main_loop(int);
 void usage(const char *, int);
 void signal_terminate(int);
-
+void add_header(struct http_header *, const char *, size_t);
