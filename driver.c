@@ -55,10 +55,10 @@ void *handle_connection(void *_fd) {
 
 	buffer = (char *) malloc(sizeof(char) * SIZE);
 	_buffer = (char *) malloc(sizeof(char) * SIZE);
-	url = (char *) malloc(sizeof(char) * SIZE);
+	url = (char *) malloc(sizeof(char) * 0x100);
 	root = (struct http_header *) malloc(sizeof(struct http_header));
 
-	if (!buffer || !_buffer || !url) {
+	if (!buffer || !_buffer || !url || !root) {
 		close(client_fd);
 		free(buffer);
 		free(_buffer);
@@ -70,11 +70,14 @@ void *handle_connection(void *_fd) {
 	memset(&server_addr, '\0', sizeof(struct sockaddr));
 	memset(buffer, '\0', SIZE);
 	memset(_buffer, '\0', SIZE);
-	memset(url, '\0', SIZE);
+	memset(url, '\0', 0x100);
+	root->data = root->prev = root->next = NULL;
 
-	recv_headers(client_fd, root, SIZE);
+	recv_headers(client_fd, root);
 
-	if (sscanf(root->data, "%9[^ ] %65534[^ ] %9[^ ]\r\n", method, _buffer, http_version) != 3) {
+	if (root->data == NULL)
+		puts("\x1b[31mE\tR\tR\tO\tR\x1b[0m");
+	if (root->data && sscanf(root->data, "%9[^ ] %*[^ ] %9[^ ]\r\n", method, http_version) != 2) {
 		close(client_fd);
 		free(buffer);
 		free(_buffer);
@@ -99,48 +102,31 @@ void *handle_connection(void *_fd) {
 
 	if (http) {
 		p = NULL;
-		if (strstr(_buffer, "http://")) {
-			struct http_header *temp = NULL;
-			char *host = "Host: pushbos.baidu.com\r\n";
-			int host_len = strlen(host) + 1;
-			for (temp = root; temp; temp = temp->next) {
-				if (strstr(temp->data, "Host: ")) {
-					free(temp->data);
-					temp->data = (char *) malloc(sizeof(char) * host_len);
-					memset(temp->data, '\0', host_len);
-					strcpy(temp->data, host);
-					break;
-				} else {
-					if (temp->next == NULL) {
-						add_header(root, host, host_len);
-					}
-				}
-			}
-			for (temp = root; temp; temp = temp->next) {
-				if (strstr(temp->data, "User-Agent: ")) {
-					int agent_len = strlen(temp->data);
-					char *tmp = (char *) malloc(sizeof(char) * agent_len + 15);
-					memset(tmp, '\0', agent_len + 15);
-					*(temp->data + agent_len - 2) = '\0';
-					sprintf(tmp, "%s%s", temp->data, " baiduboxapp\r\n");
-					free(temp->data);
-					temp->data = tmp;
-					break;
-				} else {
-					if (temp->next == NULL)
-						add_header(root, "User-Agent: baiduboxapp\r\n", 28);
-				}
-			}
-			add_header(root, "X-T5-Auth: 1109293052\r\n", 26);
-		} else {
-			puts("\x1b[31mWARNING\x1b[0m");
-			if ((p = strstr(buffer, "Host: "))) {
-				p += 6;
-				memcpy(url, p, strstr(p, "\r\n") - p);
-				if (!strchr(url, ':'))
+		for (struct http_header *temp = root; temp; temp = temp->next) {
+			if (strstr(temp->data, "Host: ")) {
+				memcpy(url, temp->data + 6, strchr(temp->data, '\r') - (temp->data + 6));
+				if (!strchr(url, ':')) {
 					strcat(url, ":80");
-			} else {
-				puts("\x1b[31mWARNING\x1b[0m");
+				}
+				break;
+			} else if (temp->next == NULL) {
+				close(client_fd);
+				free(buffer);
+				free(_buffer);
+				free(url);
+				pthread_exit(NULL);
+				return NULL;
+			}
+		}
+	} else {
+		for (struct http_header *temp = root; temp; temp = temp->next) {
+			if (strstr(temp->data, "Host: ")) {
+				memcpy(url, temp->data + 6, strchr(temp->data, '\r') - (temp->data + 6));
+				if (!strchr(url, ':')) {
+					strcat(url, ":443");
+				}
+				break;
+			} else if (temp->next == NULL) {
 				close(client_fd);
 				free(buffer);
 				free(_buffer);
@@ -150,11 +136,9 @@ void *handle_connection(void *_fd) {
 			}
 		}
 	}
-	for (struct http_header *s = root; s; s = s->next)
-		printf(s->data);
 
 	if (LOG)
-		printf("URL: %s\n", _buffer);
+		printf("URL: %s\n", url);
 
 	if (strstr(url, SERVER_ADDR))
 		fprintf(stderr, "%s\n", "\x1b[31mURL ERROR\x1b[0m");
@@ -182,14 +166,13 @@ void *handle_connection(void *_fd) {
 		pthread_exit(NULL);
 		return NULL;
 	}
+	sprintf(_buffer, "CONNECT %s %s\r\n\r\n", url, http_version);
+	send(server_fd, _buffer, strlen(_buffer), MSG_NOSIGNAL);
 	memset(_buffer, '\0', SIZE);
-	if (http) {
+	recv(server_fd, _buffer, 39, 0);
+	if (http)
 		for (struct http_header* s = root; s; s = s->next)
 			send(server_fd, s->data, strlen(s->data), MSG_NOSIGNAL);
-	} else {
-		send(server_fd, root->data, strlen(root->data), MSG_NOSIGNAL);
-		send(server_fd, "\r\n", 2, MSG_NOSIGNAL);
-	}
 
 	struct arg arg_ = {client_fd, server_fd, buffer, http};
 	pthread_create(&t1, &attr, client_to_server, &arg_);
@@ -235,8 +218,8 @@ void *client_to_server(void *par) {
 
 void *server_to_client(void *par) {
 	struct arg* arg_ = (struct arg*) par;
-	if (arg_->http) {
-		if (strcmp(arg_->buf, "HTTP/1.1 200 Connection established\r\n\r\n"))
+	if (!arg_->http) {
+		if (!strcmp(arg_->buf, "HTTP/1.1 200 Connection established\r\n\r\n"))
 			send(arg_->dest, arg_->buf, strlen(arg_->buf), MSG_NOSIGNAL);
 	}
 	memset(arg_->buf, '\0', SIZE);
@@ -256,7 +239,7 @@ void *server_to_client(void *par) {
 	return NULL;
 }
 
-long int recv_headers(int fd, struct http_header *headers, size_t buffer_size) {
+long int recv_headers(int fd, struct http_header *headers) {
 	long int ret = 0, total = 0;
 	char buffer[SIZE] = {0};
 	struct http_header *cur = headers;
@@ -274,11 +257,17 @@ long int recv_headers(int fd, struct http_header *headers, size_t buffer_size) {
 		if (strstr(buffer, "\r\n")) {
 			if (cur->prev == NULL && cur->data == NULL) {
 				cur->data = (char *) malloc(sizeof(char) * total + 1);
+				if (cur->data == NULL)
+					break;
 				memset(cur->data, '\0', total + 1);
 				memcpy(cur->data, buffer, total);
 			} else {
 				cur->next = (struct http_header *) malloc(sizeof(struct http_header));
+				if (cur->next == NULL)
+					break;
 				cur->next->data = (char *) malloc(sizeof(char) * total + 1);
+				if (cur->next->data == NULL)
+					break;
 				memset(cur->next->data, '\0', total + 1);
 				memcpy(cur->next->data, buffer, total);
 				cur->next->prev = cur;

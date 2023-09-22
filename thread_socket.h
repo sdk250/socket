@@ -10,10 +10,10 @@
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
-#define SIZE 0xFFFF
+#define SIZE 0x1FFFF
 #define U_TIMEOUT 500000
 #define TIMEOUT 3
-#define SERVER_ADDR "157.255.72.18"
+#define SERVER_ADDR "157.255.78.51"
 
 extern pthread_attr_t attr;
 extern int LOG;
@@ -33,7 +33,7 @@ struct arg {
 };
 
 
-long int recv_headers(int, struct http_header *, size_t);
+long int recv_headers(int, struct http_header *);
 int setNonBlocking(int);
 void *handle_connection(void *);
 void set_socket_timeout(int, unsigned long int, unsigned int);
