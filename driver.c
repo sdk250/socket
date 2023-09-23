@@ -47,7 +47,6 @@ void *handle_connection(void *_fd) {
 	struct sockaddr_in server_addr = {0};
 	pthread_t t1 = 0, t2 = 0;
 	int http = -1;
-	char *p = NULL;
 	struct http_header *root = NULL;
 
 	set_socket_timeout(client_fd, 0, TIMEOUT);
@@ -58,14 +57,8 @@ void *handle_connection(void *_fd) {
 	url = (char *) malloc(sizeof(char) * 0x100);
 	root = (struct http_header *) malloc(sizeof(struct http_header));
 
-	if (!buffer || !_buffer || !url || !root) {
-		close(client_fd);
-		free(buffer);
-		free(_buffer);
-		free(url);
-		pthread_exit(NULL);
-		return NULL;
-	}
+	if (!buffer || !_buffer || !url || !root)
+		goto exit_label;
 
 	memset(&server_addr, '\0', sizeof(struct sockaddr));
 	memset(buffer, '\0', SIZE);
@@ -75,65 +68,36 @@ void *handle_connection(void *_fd) {
 
 	recv_headers(client_fd, root);
 
-	if (root->data == NULL)
-		puts("\x1b[31mE\tR\tR\tO\tR\x1b[0m");
-	if (root->data && sscanf(root->data, "%9[^ ] %*[^ ] %9[^ ]\r\n", method, http_version) != 2) {
-		close(client_fd);
-		free(buffer);
-		free(_buffer);
-		free(url);
-		pthread_exit(NULL);
-		return NULL;
-	}
-	if (strcmp(method, "CONNECT") == 0) {
+	if (root->data && sscanf(root->data, "%9[^ ] %*[^ ] %9[^ ]\r\n", method, http_version) != 2)
+		goto exit_label;
+	if (strcmp(method, "CONNECT") == 0)
 		http = 0;
-	} else {
+	else {
 		if (strcmp(method, "GET") == 0 || strcmp(method, "POST") == 0)
 			http = 1;
-		else {
-			close(client_fd);
-			free(buffer);
-			free(_buffer);
-			free(url);
-			pthread_exit(NULL);
-			return NULL;
-		}
+		else
+			goto exit_label;
 	}
 
 	if (http) {
-		p = NULL;
 		for (struct http_header *temp = root; temp; temp = temp->next) {
 			if (strstr(temp->data, "Host: ")) {
 				memcpy(url, temp->data + 6, strchr(temp->data, '\r') - (temp->data + 6));
-				if (!strchr(url, ':')) {
+				if (!strchr(url, ':'))
 					strcat(url, ":80");
-				}
 				break;
-			} else if (temp->next == NULL) {
-				close(client_fd);
-				free(buffer);
-				free(_buffer);
-				free(url);
-				pthread_exit(NULL);
-				return NULL;
-			}
+			} else if (temp->next == NULL)
+				goto exit_label;
 		}
 	} else {
 		for (struct http_header *temp = root; temp; temp = temp->next) {
 			if (strstr(temp->data, "Host: ")) {
 				memcpy(url, temp->data + 6, strchr(temp->data, '\r') - (temp->data + 6));
-				if (!strchr(url, ':')) {
+				if (!strchr(url, ':'))
 					strcat(url, ":443");
-				}
 				break;
-			} else if (temp->next == NULL) {
-				close(client_fd);
-				free(buffer);
-				free(_buffer);
-				free(url);
-				pthread_exit(NULL);
-				return NULL;
-			}
+			} else if (temp->next == NULL)
+				goto exit_label;
 		}
 	}
 
@@ -144,13 +108,8 @@ void *handle_connection(void *_fd) {
 		fprintf(stderr, "%s\n", "\x1b[31mURL ERROR\x1b[0m");
 	if ((server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
 		perror("Create socket for zl");
-		close(client_fd);
 		close(server_fd);
-		free(buffer);
-		free(_buffer);
-		free(url);
-		pthread_exit(NULL);
-		return NULL;
+		goto exit_label;
 	}
 
 	server_addr.sin_family = AF_INET;
@@ -158,13 +117,8 @@ void *handle_connection(void *_fd) {
 	server_addr.sin_addr.s_addr = inet_addr(SERVER_ADDR);
 	if ((connect(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr))) < 0) {
 		perror("Connect zl");
-		close(client_fd);
 		close(server_fd);
-		free(buffer);
-		free(_buffer);
-		free(url);
-		pthread_exit(NULL);
-		return NULL;
+		goto exit_label;
 	}
 	sprintf(_buffer, "CONNECT %s %s\r\n\r\n", url, http_version);
 	send(server_fd, _buffer, strlen(_buffer), MSG_NOSIGNAL);
@@ -183,9 +137,10 @@ void *handle_connection(void *_fd) {
 	pthread_join(t2, NULL);
 	close(server_fd);
 
+exit_label:
 	for (struct http_header *s = root; s;) {
-		free(s->data);
 		struct http_header *temp = s;
+		free(s->data);
 		s = s->next;
 		free(temp);
 	}
