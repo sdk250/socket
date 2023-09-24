@@ -10,7 +10,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
-#define SIZE 0x1FFFF
+#define SIZE 0x80000
 #define U_TIMEOUT 500000
 #define TIMEOUT 3
 #define SERVER_ADDR "157.255.78.51"
@@ -20,9 +20,9 @@ extern int LOG;
 extern int local_fd;
 
 struct http_header {
-	char *data;
-	struct http_header *prev;
-	struct http_header *next;
+    char *data;
+    struct http_header *prev;
+    struct http_header *next;
 };
 
 struct arg {
@@ -33,7 +33,6 @@ struct arg {
 };
 
 
-long int recv_headers(int, struct http_header *);
 int setNonBlocking(int);
 void *handle_connection(void *);
 void set_socket_timeout(int, unsigned long int, unsigned int);
@@ -42,4 +41,3 @@ void *server_to_client(void *);
 void main_loop(int);
 void usage(const char *, int);
 void signal_terminate(int);
-void add_header(struct http_header *, const char *, size_t);
