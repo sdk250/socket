@@ -167,7 +167,8 @@ void *handle_connection(void *_fd) {
 exit_label:
     for (struct http_header *s = root; s;) {
         struct http_header *temp = s;
-        free(s->data);
+        if (s->data)
+            free(s->data);
         s = s->next;
         free(temp);
     }
