@@ -25,19 +25,19 @@ struct http_header {
     struct http_header *next;
 };
 
-struct arg {
-    int source;
-    int dest;
+struct sock_argu {
+    int *source;
+    int *dest;
     char *buf;
-    int http;
+    int *http;
 };
 
 
 int setNonBlocking(int);
 void *handle_connection(void *);
 void set_socket_timeout(int, unsigned long int, unsigned int);
-void *client_to_server(void *);
-void *server_to_client(void *);
+void *client_to_server_fn(void *);
+void *server_to_client_fn(void *);
 void main_loop(int);
 void usage(const char *, int);
 void signal_terminate(int);

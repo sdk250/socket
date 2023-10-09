@@ -21,7 +21,10 @@ void main_loop(int local_fd) {
 }
 
 void set_socket_timeout(int fd, unsigned long int usec, unsigned int sec) {
-    struct timeval tv = {usec, sec};
+    struct timeval tv = {
+        .tv_usec = usec,
+        .tv_sec = sec
+    };
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (void *) &tv, sizeof(struct timeval));
     tv.tv_usec = usec;
     tv.tv_sec = sec;
@@ -30,35 +33,36 @@ void set_socket_timeout(int fd, unsigned long int usec, unsigned int sec) {
 
 void *handle_connection(void *_fd) {
     int server_fd = 0;
-    int client_fd = *(int *)_fd;
+    int http = -1;
     long int ret = 0, total = 0;
-    char *buffer = NULL, *_buffer = NULL, *url = NULL;
+    char *url = NULL;
     char method[10] = {0}, http_version[10] = {0};
     struct sockaddr_in server_addr = {0};
-    pthread_t t1 = 0, t2 = 0;
-    int http = -1;
     struct http_header *root = NULL, *cur = NULL;
+    struct sock_argu client_to_server = {0}, server_to_client = {0};
+    pthread_t t1 = 0, t2 = 0;
 
-    set_socket_timeout(client_fd, 0, TIMEOUT);
-    free((int *) _fd);
-
-    buffer = (char *) malloc(sizeof(char) * SIZE);
-    _buffer = (char *) malloc(sizeof(char) * SIZE);
+    client_to_server.http = server_to_client.http = &http;
+    client_to_server.source = server_to_client.dest = (int *) _fd;
+    client_to_server.dest = server_to_client.source = &server_fd;
+    client_to_server.buf = (char *) malloc(sizeof(char) * SIZE);
+    server_to_client.buf = (char *) malloc(sizeof(char) * SIZE);
     url = (char *) malloc(sizeof(char) * 0x100);
     root = (struct http_header *) malloc(sizeof(struct http_header));
+    set_socket_timeout(*(client_to_server.source), 0, TIMEOUT);
 
-    if (!buffer || !_buffer || !url || !root)
+    if (!client_to_server.buf || !server_to_client.buf || !url || !root)
         goto exit_label;
 
     memset(&server_addr, '\0', sizeof(struct sockaddr));
-    memset(buffer, '\0', SIZE);
-    memset(_buffer, '\0', SIZE);
+    memset(client_to_server.buf, '\0', SIZE);
+    memset(server_to_client.buf, '\0', SIZE);
     memset(url, '\0', 0x100);
     root->data = root->prev = root->next = NULL;
     cur = root;
 
     for (char ch = 0; total <= SIZE; ch = 0) {
-        ret = recv(client_fd, &ch, 1, 0);
+        ret = recv(*(client_to_server.source), &ch, 1, 0);
         if (ret == -1) {
             if (errno == EINTR || errno == EAGAIN)
                 continue;
@@ -67,14 +71,14 @@ void *handle_connection(void *_fd) {
         } else if (ret == 0)
             break;
         else
-            *(buffer + total++) = ch;
-        if (strstr(buffer, "\r\n")) {
+            *(client_to_server.buf + total++) = ch;
+        if (strstr(client_to_server.buf, "\r\n")) {
             if (cur->prev == NULL && cur->data == NULL) {
                 cur->data = (char *) malloc(sizeof(char) * total + 1);
                 if (cur->data == NULL)
                     break;
                 memset(cur->data, '\0', total + 1);
-                memcpy(cur->data, buffer, total);
+                memcpy(cur->data, client_to_server.buf, total);
             } else {
                 cur->next = (struct http_header *) malloc(sizeof(struct http_header));
                 if (cur->next == NULL)
@@ -83,14 +87,14 @@ void *handle_connection(void *_fd) {
                 if (cur->next->data == NULL)
                     break;
                 memset(cur->next->data, '\0', total + 1);
-                memcpy(cur->next->data, buffer, total);
+                memcpy(cur->next->data, client_to_server.buf, total);
                 cur->next->prev = cur;
                 cur->next->next = NULL;
                 cur = cur->next;
             }
-            if (strcmp(buffer, "\r\n") == 0)
+            if (strcmp(client_to_server.buf, "\r\n") == 0)
                 break;
-            memset(buffer, '\0', SIZE);
+            memset(client_to_server.buf, '\0', SIZE);
             total = 0;
         }
     }
@@ -147,18 +151,16 @@ void *handle_connection(void *_fd) {
         close(server_fd);
         goto exit_label;
     }
-    sprintf(_buffer, "CONNECT %s %s\r\n\r\n", url, http_version);
-    send(server_fd, _buffer, strlen(_buffer), MSG_NOSIGNAL);
-    memset(_buffer, '\0', SIZE);
-    recv(server_fd, _buffer, 39, 0);
+    sprintf(server_to_client.buf, "CONNECT %s %s\r\n\r\n", url, http_version);
+    send(server_fd, server_to_client.buf, strlen(server_to_client.buf), MSG_NOSIGNAL);
+    memset(server_to_client.buf, '\0', SIZE);
+    recv(server_fd, server_to_client.buf, 39, 0);
     if (http)
         for (struct http_header* s = root; s; s = s->next)
             send(server_fd, s->data, strlen(s->data), MSG_NOSIGNAL);
 
-    struct arg arg_ = {client_fd, server_fd, buffer, http};
-    pthread_create(&t1, &attr, client_to_server, &arg_);
-    struct arg arg2 = {server_fd, client_fd, _buffer, http};
-    pthread_create(&t2, &attr, server_to_client, &arg2);
+    pthread_create(&t1, &attr, client_to_server_fn, &client_to_server);
+    pthread_create(&t2, &attr, server_to_client_fn, &server_to_client);
 
     pthread_join(t1, NULL);
     pthread_join(t2, NULL);
@@ -172,52 +174,53 @@ exit_label:
         s = s->next;
         free(temp);
     }
-    close(client_fd);
-    free(buffer);
-    free(_buffer);
+    close(*(client_to_server.source));
+    free((int *) _fd);
+    free(client_to_server.buf);
+    free(server_to_client.buf);
     free(url);
     pthread_exit(NULL);
     return NULL;
 }
 
-void *client_to_server(void *par) {
-    struct arg *arg_ = (struct arg *) par;
+void *client_to_server_fn(void *par) {
+    struct sock_argu *arg_ = (struct sock_argu *) par;
     memset(arg_->buf, '\0', SIZE);
 
-    for (long int n = 0; (n = recv(arg_->source, arg_->buf, SIZE, 0));) {
+    for (long int n = 0; (n = recv(*(arg_->source), arg_->buf, SIZE, 0));) {
         if (n == -1) {
             if (errno == EINTR || errno == EAGAIN)
                 continue;
             else
                 break;
         }
-        send(arg_->dest, arg_->buf, n, MSG_NOSIGNAL);
+        send(*(arg_->dest), arg_->buf, n, MSG_NOSIGNAL);
     }
-    shutdown(arg_->dest, SHUT_RDWR);
-    shutdown(arg_->source, SHUT_RDWR);
+    shutdown(*(arg_->dest), SHUT_RDWR);
+    shutdown(*(arg_->source), SHUT_RDWR);
     pthread_exit(NULL);
     return NULL;
 }
 
-void *server_to_client(void *par) {
-    struct arg* arg_ = (struct arg*) par;
-    if (!arg_->http) {
+void *server_to_client_fn(void *par) {
+    struct sock_argu* arg_ = (struct sock_argu *) par;
+    if (!*(arg_->http)) {
         if (!strcmp(arg_->buf, "HTTP/1.1 200 Connection established\r\n\r\n"))
-            send(arg_->dest, arg_->buf, strlen(arg_->buf), MSG_NOSIGNAL);
+            send(*(arg_->dest), arg_->buf, strlen(arg_->buf), MSG_NOSIGNAL);
     }
     memset(arg_->buf, '\0', SIZE);
 
-    for (long int n = 0; (n = recv(arg_->source, arg_->buf, SIZE, 0)) > 0;) {
+    for (long int n = 0; (n = recv(*(arg_->source), arg_->buf, SIZE, 0)) > 0;) {
         if (n == -1) {
             if (errno == EINTR || errno == EAGAIN)
                 continue;
             else
                 break;
         }
-        send(arg_->dest, arg_->buf, n, MSG_NOSIGNAL);
+        send(*(arg_->dest), arg_->buf, n, MSG_NOSIGNAL);
     }
-    shutdown(arg_->dest, SHUT_RDWR);
-    shutdown(arg_->source, SHUT_RDWR);
+    shutdown(*(arg_->dest), SHUT_RDWR);
+    shutdown(*(arg_->source), SHUT_RDWR);
     pthread_exit(NULL);
     return NULL;
 }
