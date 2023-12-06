@@ -2,11 +2,12 @@
 这是一个`专门`用于百度直连的http轻量代理<br>
 使用多线程编写，本身编译出来极为轻量<br>
 修改`用于连接的IP`在`thread_socket.h`中的宏定义`SERVER_ADDR`，将它修改为你想使用的百度直连IP，然后重新编译即可。<br>
+亦或者运行时加上 `-r` 参数来指定<br>
 # Compile
 ```shell
 make
 ```
-If is not working, please try:
+If it is not working, please try:
 ```shell
 clang -m64 -O3 -Wall -lpthread -o thread_socket thread_socket.c driver.c
 ```
@@ -19,6 +20,8 @@ Usage of ./thread_socket:
         -l      Show running log
         -u      <UID>
                 Set UID while running
+        -r      <SERVER ADDRESS>
+                Set IP of peer
         -d      Start daemon service
         -h      Show this message
 ```

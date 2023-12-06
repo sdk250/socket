@@ -3,6 +3,7 @@
 pthread_attr_t attr = {0};
 int LOG = 0;
 int local_fd = 0;
+char ip[16] = {0};
 
 int main(int argc, char **argv) {
     struct sockaddr_in local_addr = {0};
@@ -15,7 +16,7 @@ int main(int argc, char **argv) {
 
     if (argc == 1)
         usage(*argv, EXIT_FAILURE);
-    for (;(opt = getopt(argc, argv, "p:u:dlh")) != -1;) {
+    for (;(opt = getopt(argc, argv, "p:u:r:dlh")) != -1;) {
         switch(opt) {
             case 'p':
                 port = atoi(optarg);
@@ -29,6 +30,9 @@ int main(int argc, char **argv) {
             case 'u':
                 if (setuid(atoi(optarg)))
                     perror("Setuid error");
+                break;
+            case 'r':
+                strncpy(ip, optarg, 15);
                 break;
             case 'h':
                 usage(*argv, EXIT_SUCCESS);
@@ -45,6 +49,8 @@ int main(int argc, char **argv) {
         }
     }
 
+    if (*ip == '\0')
+        strncpy(ip, SERVER_ADDR, 15);
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, signal_terminate);
     if ((local_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {

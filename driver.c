@@ -6,7 +6,18 @@ void signal_terminate(int sign) {
 }
 
 void usage(const char *argv, int ret) {
-    printf("Usage of %s:\n\t-p\t<PORT>\n\t\tSet PORT while running\n\t-l\tShow running log\n\t-u\t<UID>\n\t\tSet UID while running\n\t-d\tStart daemon service\n\t-h\tShow this message\n", argv);
+    printf("Usage of %s:\n"
+        "\t-p\t<PORT>\n"
+            "\t\tSet PORT while running\n"
+        "\t-u\t<UID>\n"
+            "\t\tSet UID while running\n"
+        "\t-r\t<SERVER ADDRESS>\n"
+            "\t\tSet IP of peer\n"
+        "\t-l\tShow running log\n"
+        "\t-d\tStart daemon service\n"
+        "\t-h\tShow this message\n",
+        argv
+    );
     exit(ret);
 }
 
@@ -135,7 +146,7 @@ void *handle_connection(void *_fd) {
     if (LOG)
         printf("URL: %s\n", url);
 
-    if (strstr(url, SERVER_ADDR))
+    if (strstr(url, ip))
         fprintf(stderr, "%s\n", "\x1b[31mURL ERROR\x1b[0m");
     if ((server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
         perror("Create socket for zl");
@@ -145,7 +156,7 @@ void *handle_connection(void *_fd) {
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(443);
-    server_addr.sin_addr.s_addr = inet_addr(SERVER_ADDR);
+    server_addr.sin_addr.s_addr = inet_addr(ip);
     if ((connect(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr))) < 0) {
         perror("Connect zl");
         close(server_fd);
