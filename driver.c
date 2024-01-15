@@ -102,8 +102,8 @@ void *handle_connection(void *_fd) {
     close(server_fd);
 
 exit_label:
-    close(*(client_to_server.source));
-    free((int *) _fd);
+    close(*client_to_server.source);
+    free(client_to_server.source);
     free(client_to_server.buf);
     free(server_to_client.buf);
     pthread_exit(NULL);
@@ -114,17 +114,17 @@ void *swap_data(void *par) {
     struct sock_argu *arg_ = (struct sock_argu *) par;
     memset(arg_->buf, '\0', SIZE);
 
-    for (long int n = 0; (n = recv(*(arg_->source), arg_->buf, SIZE, 0));) {
+    for (long int n = 0; (n = recv(*arg_->source, arg_->buf, SIZE, 0));) {
         if (n == -1) {
             if (errno == EINTR || errno == EAGAIN)
                 continue;
             else
                 break;
         }
-        send(*(arg_->dest), arg_->buf, n, MSG_NOSIGNAL);
+        send(*arg_->dest, arg_->buf, n, MSG_NOSIGNAL);
     }
-    shutdown(*(arg_->dest), SHUT_RDWR);
-    shutdown(*(arg_->source), SHUT_RDWR);
+    shutdown(*arg_->dest, SHUT_RDWR);
+    shutdown(*arg_->source, SHUT_RDWR);
     pthread_exit(NULL);
     return NULL;
 }
