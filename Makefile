@@ -1,7 +1,7 @@
-CFLAGS = -m64 -O3 -Wall -lpthread -fPIE -fstack-protector-all -Wno-incompatible-pointer-types
+CFLAGS = -m64 -O3 -Wall -lpthread -fPIE -fstack-protector -Wno-incompatible-pointer-types
 
 thread_socket:
-	gcc $(CFLAGS) -o $(@) thread_socket.c driver.c
+	clang $(CFLAGS) -o $(@) thread_socket.c driver.c
 
 clean:
 	rm ./thread_socket
