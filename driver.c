@@ -55,6 +55,7 @@ void set_socket_timeout(int fd, unsigned long int usec, unsigned int sec) {
 
 void *handle_connection(void *_fd) {
     int server_fd = 0, https = 0;
+    uint32_t addr = 0;
     long int total = 0;
     struct sockaddr_in server_addr = {0}, destination_addr = {0};
     struct sock_argu client_to_server = {0}, server_to_client = {0};
@@ -89,7 +90,13 @@ void *handle_connection(void *_fd) {
         goto exit_label;
     }
 
-    if (strcmp(inet_ntoa(destination_addr.sin_addr), "127.0.0.1") == 0) {
+    if (((addr = ntohl(destination_addr.sin_addr.s_addr)) & 0xff000000) == 0x0a000000 || // 10.0.0.0/8
+        ((addr = ntohl(destination_addr.sin_addr.s_addr)) & 0xfff00000) == 0xac100000 || // 172.16.0.0/12
+        ((addr = ntohl(destination_addr.sin_addr.s_addr)) & 0xffff0000) == 0xc0a80000 || // 192.168.0.0/16
+        ((addr = ntohl(destination_addr.sin_addr.s_addr)) & 0xff000000) == 0x7f000000 || // 127.0.0.0/8
+        ((addr = ntohl(destination_addr.sin_addr.s_addr)) & 0xffff0000) == 0xa9fe0000 || // 169.254.0.0/16
+        ((addr = ntohl(destination_addr.sin_addr.s_addr)) & 0xf0000000) == 0xe0000000 // 224.0.0.0/4
+    ) {
         for (; total <= SIZE; ) {
             char ch = 0;
             short int ret = recv(*client_to_server.source, &ch, 1, 0);
@@ -113,7 +120,8 @@ void *handle_connection(void *_fd) {
                     goto exit_label;
                 }
             }
-        } else https = 1;
+        } else
+            https = 1;
     } else
         snprintf(
             url,
@@ -130,8 +138,10 @@ void *handle_connection(void *_fd) {
         char *p1 = NULL;
         strncpy(url, ch, len);
         memset(url + len, '\0', LEN_URL - strlen(url) + len);
-        if ((p = strchr(ch, '/'))) *p = '\0';
-        (p1 = strchr(ch, ':')) ? NULL : strcat(ch, ":80");
+        if ((p = strchr(ch, '/')))
+            *p = '\0';
+        if (!(p1 = strchr(ch, ':')))
+            strcat(ch, ":80");
     }
 
     if (LOG)
