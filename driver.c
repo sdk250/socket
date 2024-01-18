@@ -219,6 +219,7 @@ void *swap_data(void *par) {
                 break;
         }
         send(*arg_->dest, arg_->buf, n, MSG_NOSIGNAL);
+        memset(arg_->buf, '\0', n);
     }
     shutdown(*arg_->dest, SHUT_RDWR);
     shutdown(*arg_->source, SHUT_RDWR);
