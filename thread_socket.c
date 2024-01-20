@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
         close(local_fd);
     }
-    printf("Listen on %s:%u.\n", inet_ntoa(local_addr.sin_addr), port);
+    printf(__TIME__ "\t" __DATE__ "\nListen on %s:%u.\n", inet_ntoa(local_addr.sin_addr), port);
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, 256 * 1024);
     if (daemon) {

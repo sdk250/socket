@@ -13,9 +13,9 @@
 #include <pthread.h>
 #include <signal.h>
 #include <linux/netfilter_ipv4.h>
-#define SIZE 0xFFFF
+#define SIZE 0x40000
 #define LEN_URL (SIZE / 2)
-#define LEN_URL_STR "32766" // LEN_URL - 1
+#define LEN_URL_STR "131071" // LEN_URL - 1
 #define U_TIMEOUT 500000
 #define TIMEOUT 3
 #define SERVER_ADDR "110.242.70.69"
