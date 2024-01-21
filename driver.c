@@ -189,6 +189,9 @@ void *handle_connection(void *_fd) {
             MSG_NOSIGNAL
         );
 
+    memset(client_to_server.buf, '\0', SIZE);
+    memset(server_to_client.buf, '\0', SIZE);
+
     pthread_create(&t1, &attr, swap_data, &client_to_server);
     pthread_create(&t2, &attr, swap_data, &server_to_client);
 
@@ -209,10 +212,9 @@ exit_label:
 
 void *swap_data(void *par) {
     struct sock_argu *arg_ = (struct sock_argu *) par;
-    memset(arg_->buf, '\0', SIZE);
 
     for (long int n = 0; (n = recv(*arg_->source, arg_->buf, SIZE, 0)); ) {
-        if (n == -1) {
+        if (n < 0) {
             if (errno == EINTR || errno == EAGAIN)
                 continue;
             else
