@@ -28,8 +28,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           files: thread_socket
-          tag_name: v$(date '+%Y%m%d%H%M%S')
-          release_name: Release ${{ github.ref }}
+          tag_name: V0.1
+          release_name: Release V0.1
           draft: false
           prerelease: false
           token: ${{ secrets.GITHUB_TOKEN }}
