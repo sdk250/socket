@@ -27,7 +27,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          files: thread_socket
+          files: ./thread_socket
           tag_name: V0.1
           release_name: Release V0.1
           draft: false
