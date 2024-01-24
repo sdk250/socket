@@ -3,15 +3,32 @@ name: C/C++ CI
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  release:
+    types:
+      - created
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
-    - name: make
-      run: make
+      - name: Check code
+        uses: actions/checkout@v3
+
+      - name: make
+        run: make
+
+  create_release:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Create release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{secrets.CREATE_RELEASE}}
+        with:
+          files: thread_socket
+          tag_name: ${{github.ref}}
+          release_name: Release ${{github.ref}}
+          draft: false
+          prerelease: false
