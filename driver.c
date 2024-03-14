@@ -86,10 +86,11 @@ void *handle_connection(void *_fd) {
     ) < 0)
     {
         perror("getsockopt SO_ORIGINAL_DST failed");
-        goto exit_label;
+        // goto exit_label;
     }
 
-    if ((ntohl(destination_addr.sin_addr.s_addr) & 0xff000000) == 0x0a000000 || // 10.0.0.0/8
+    if ((ntohl(destination_addr.sin_addr.s_addr) == 0x0) || // 0.0.0.0/0
+        (ntohl(destination_addr.sin_addr.s_addr) & 0xff000000) == 0x0a000000 || // 10.0.0.0/8
         (ntohl(destination_addr.sin_addr.s_addr) & 0xfff00000) == 0xac100000 || // 172.16.0.0/12
         (ntohl(destination_addr.sin_addr.s_addr) & 0xffff0000) == 0xc0a80000 || // 192.168.0.0/16
         (ntohl(destination_addr.sin_addr.s_addr) & 0xff000000) == 0x7f000000 || // 127.0.0.0/8
