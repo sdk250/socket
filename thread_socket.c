@@ -76,7 +76,8 @@ int main(int argc, char **argv) {
     }
     printf(__TIME__ "\t" __DATE__ "\nListen on %s:%u.\n", inet_ntoa(local_addr.sin_addr), port);
     pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 256 * 1024);
+    pthread_attr_setstacksize(&attr, 512 * 1024);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     if (daemon) {
         if ((pid = fork()) == 0) {
             if ((sid = setsid()) < 0) {

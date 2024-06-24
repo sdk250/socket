@@ -1,6 +1,7 @@
 #include "thread_socket.h"
 
 void signal_terminate(int sign) {
+    pthread_attr_destroy(&attr);
     close(local_fd);
     exit(EXIT_SUCCESS);
 }
@@ -58,7 +59,7 @@ void *handle_connection(void *_fd) {
     long int total = 0;
     struct sockaddr_in server_addr = {0}, destination_addr = {0};
     struct sock_argu client_to_server = {0}, server_to_client = {0};
-    char *url = NULL, *ch = NULL;
+    char *url = NULL;
     pthread_t t1 = 0, t2 = 0;
 
     client_to_server.source = server_to_client.dest = (int *) _fd;
@@ -131,17 +132,11 @@ void *handle_connection(void *_fd) {
             ntohs(destination_addr.sin_port)
         );
 
-    if ((ch = strstr(url, "//"))) {
-        ch += 2;
-        unsigned int len = ch - url + 1;
-        char *p = NULL;
-        char *p1 = NULL;
-        strncpy(url, ch, len);
-        memset(url + len, '\0', LEN_URL - strlen(url) + len);
-        if ((p = strchr(ch, '/')))
-            *p = '\0';
-        if (!(p1 = strchr(ch, ':')))
-            strcat(ch, ":80");
+    if (!strncmp(url, "http://", 7))
+    {
+        memcpy(url, url + 7, total - 7);
+        strchr(url, '/') ? *strchr(url, '/') = 0 : NULL;
+        strcat(url, ":80\0");
     }
 
     if (LOG)
@@ -162,7 +157,10 @@ void *handle_connection(void *_fd) {
     server_addr.sin_port = htons(443);
     server_addr.sin_addr.s_addr = inet_addr(ip);
 
-    if (connect(server_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
+    if (connect(server_fd,
+        (struct sockaddr *) &server_addr,
+        sizeof(server_addr)) < 0
+    ) {
         perror("Connect zl");
         close(server_fd);
         goto exit_label;
@@ -172,7 +170,11 @@ void *handle_connection(void *_fd) {
         "CONNECT %s HTTP/1.1\r\n\r\n",
         url
     );
-    send(server_fd, server_to_client.buf, strlen(server_to_client.buf), MSG_NOSIGNAL);
+    send(server_fd,
+        server_to_client.buf,
+        strlen(server_to_client.buf),
+        MSG_NOSIGNAL
+    );
     memset(server_to_client.buf, '\0', SIZE);
     recv(server_fd, server_to_client.buf, 39, 0);
     if (https)
@@ -184,7 +186,7 @@ void *handle_connection(void *_fd) {
         );
     else
         send(
-            *client_to_server.dest,
+            *server_to_client.source,
             client_to_server.buf,
             total,
             MSG_NOSIGNAL
@@ -193,11 +195,11 @@ void *handle_connection(void *_fd) {
     memset(client_to_server.buf, '\0', SIZE);
     memset(server_to_client.buf, '\0', SIZE);
 
-    pthread_create(&t1, &attr, swap_data, &client_to_server);
-    pthread_create(&t2, &attr, swap_data, &server_to_client);
+    pthread_create(&t1, NULL, swap_data, &client_to_server);
+    pthread_create(&t2, NULL, swap_data, &server_to_client);
 
-    pthread_join(t1, NULL);
     pthread_join(t2, NULL);
+    pthread_join(t1, NULL);
 
     close(server_fd);
 
@@ -207,6 +209,7 @@ exit_label:
     free(client_to_server.buf);
     free(server_to_client.buf);
     free(url);
+    client_to_server.buf = server_to_client.buf = url = NULL;
     pthread_exit(NULL);
     return NULL;
 }
@@ -214,9 +217,10 @@ exit_label:
 void *swap_data(void *par) {
     struct sock_argu *arg_ = (struct sock_argu *) par;
 
-    for (long int n = 0; (n = recv(*arg_->source, arg_->buf, SIZE, 0)); ) {
+    for (long int n = 0; (n = recv(*arg_->source, arg_->buf, SIZE, 0)); )
+    {
         if (n < 0) {
-            if (errno == EINTR || errno == EAGAIN)
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
                 continue;
             else
                 break;
@@ -224,8 +228,9 @@ void *swap_data(void *par) {
         send(*arg_->dest, arg_->buf, n, MSG_NOSIGNAL);
         memset(arg_->buf, '\0', n);
     }
-    shutdown(*arg_->dest, SHUT_RDWR);
-    shutdown(*arg_->source, SHUT_RDWR);
+
+    shutdown(*arg_->dest, SHUT_WR);
+    shutdown(*arg_->source, SHUT_WR);
     pthread_exit(NULL);
     return NULL;
 }
