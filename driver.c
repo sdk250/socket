@@ -88,7 +88,7 @@ void *handle_connection(void *_fd) {
         SO_ORIGINAL_DST,
         &destination_addr,
         &len
-    ) == 0 && (
+    ) < 0 || (
         (ntohl(destination_addr.sin_addr.s_addr) == 0x0) || // 0.0.0.0/0
         (ntohl(destination_addr.sin_addr.s_addr) & 0xff000000) == 0x0a000000 || // 10.0.0.0/8
         (ntohl(destination_addr.sin_addr.s_addr) & 0xfff00000) == 0xac100000 || // 172.16.0.0/12
