@@ -24,6 +24,7 @@ extern pthread_attr_t attr;
 extern int LOG;
 extern int local_fd;
 extern char ip[16];
+extern int SHUTDOWN;
 
 static socklen_t len = sizeof(struct sockaddr);
 
@@ -31,6 +32,7 @@ struct sock_argu {
     int *source;
     int *dest;
     char *buf;
+    pthread_mutex_t *lock;
 };
 
 int setNonBlocking(int);

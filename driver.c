@@ -3,6 +3,7 @@
 void signal_terminate(int sign) {
     pthread_attr_destroy(&attr);
     close(local_fd);
+    SHUTDOWN = 1;
     exit(EXIT_SUCCESS);
 }
 
@@ -23,7 +24,7 @@ void usage(const char *argv, int ret) {
 }
 
 void main_loop(int local_fd) {
-    for (pthread_t tid = 0; ;) {
+    for (pthread_t tid = 0; SHUTDOWN == 0;) {
         int *client_fd = (int *) malloc(sizeof(int));
         *client_fd = accept(local_fd, (struct sockaddr *) NULL, &len);
         pthread_create(&tid, &attr, handle_connection, client_fd);
@@ -61,13 +62,16 @@ void *handle_connection(void *_fd) {
     struct sock_argu client_to_server = {0}, server_to_client = {0};
     char *url = NULL;
     pthread_t t1 = 0, t2 = 0;
+    pthread_mutex_t lock;
 
     client_to_server.source = server_to_client.dest = (int *) _fd;
     client_to_server.dest = server_to_client.source = &server_fd;
+    client_to_server.lock = server_to_client.lock = &lock;
     client_to_server.buf = (char *) malloc(sizeof(char) * SIZE);
     server_to_client.buf = (char *) malloc(sizeof(char) * SIZE);
     url = (char *) malloc(sizeof(char) * LEN_URL);
     set_socket_timeout(*(client_to_server.source), 0, TIMEOUT);
+    pthread_mutex_init(&lock, NULL);
 
     if (! client_to_server.buf || ! server_to_client.buf || ! url)
         goto exit_label;
@@ -84,20 +88,15 @@ void *handle_connection(void *_fd) {
         SO_ORIGINAL_DST,
         &destination_addr,
         &len
-    ) < 0)
-    {
-        perror("getsockopt SO_ORIGINAL_DST failed");
-        // goto exit_label;
-    }
-
-    if ((ntohl(destination_addr.sin_addr.s_addr) == 0x0) || // 0.0.0.0/0
+    ) == 0 && (
+        (ntohl(destination_addr.sin_addr.s_addr) == 0x0) || // 0.0.0.0/0
         (ntohl(destination_addr.sin_addr.s_addr) & 0xff000000) == 0x0a000000 || // 10.0.0.0/8
         (ntohl(destination_addr.sin_addr.s_addr) & 0xfff00000) == 0xac100000 || // 172.16.0.0/12
         (ntohl(destination_addr.sin_addr.s_addr) & 0xffff0000) == 0xc0a80000 || // 192.168.0.0/16
         (ntohl(destination_addr.sin_addr.s_addr) & 0xff000000) == 0x7f000000 || // 127.0.0.0/8
         (ntohl(destination_addr.sin_addr.s_addr) & 0xffff0000) == 0xa9fe0000 || // 169.254.0.0/16
         (ntohl(destination_addr.sin_addr.s_addr) & 0xf0000000) == 0xe0000000 // 224.0.0.0/4
-    ) {
+    )) {
         for (; total <= SIZE; ) {
             char ch = 0;
             short int ret = recv(*client_to_server.source, &ch, 1, 0);
@@ -135,7 +134,8 @@ void *handle_connection(void *_fd) {
     if (!strncmp(url, "http://", 7))
     {
         memcpy(url, url + 7, total - 7);
-        strchr(url, '/') ? *strchr(url, '/') = 0 : NULL;
+        if (strchr(url, '/'))
+            *strchr(url, '/') = '\0';
         strcat(url, ":80\0");
     }
 
@@ -152,6 +152,7 @@ void *handle_connection(void *_fd) {
         close(server_fd);
         goto exit_label;
     }
+    set_socket_timeout(server_fd, 0, TIMEOUT);
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(443);
@@ -204,6 +205,7 @@ void *handle_connection(void *_fd) {
     close(server_fd);
 
 exit_label:
+    pthread_mutex_destroy(&lock);
     close(*client_to_server.source);
     free(client_to_server.source);
     free(client_to_server.buf);
@@ -225,7 +227,10 @@ void *swap_data(void *par) {
             else
                 break;
         }
+        pthread_mutex_lock(arg_->lock);
         send(*arg_->dest, arg_->buf, n, MSG_NOSIGNAL);
+        pthread_mutex_unlock(arg_->lock);
+
         memset(arg_->buf, '\0', n);
     }
 

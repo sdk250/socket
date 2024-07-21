@@ -4,6 +4,7 @@ pthread_attr_t attr = {0};
 int LOG = 0;
 int local_fd = 0;
 char ip[16] = {0};
+int SHUTDOWN = 0;
 
 int main(int argc, char **argv) {
     struct sockaddr_in local_addr = {0};
