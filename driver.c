@@ -106,8 +106,10 @@ void *handle_connection(void *_fd) {
                     break;
             } else if (ret == 0)
                 break;
-            else
+            else {
                 p += ret;
+                total += ret;
+            }
 
             if (strstr(client_to_server.buf, "\r\n\r\n"))
                 break;
