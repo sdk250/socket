@@ -97,31 +97,30 @@ void *handle_connection(void *_fd) {
         (ntohl(destination_addr.sin_addr.s_addr) & 0xffff0000) == 0xa9fe0000 || // 169.254.0.0/16
         (ntohl(destination_addr.sin_addr.s_addr) & 0xf0000000) == 0xe0000000 // 224.0.0.0/4
     )) {
-        for (; total <= SIZE; ) {
-            char ch = 0;
-            short int ret = recv(*client_to_server.source, &ch, 1, 0);
+        for (char *p = client_to_server.buf; p - client_to_server.buf <= SIZE;) {
+            short int ret = recv(*client_to_server.source, p, 0xFF, 0);
             if (ret == -1) {
-                if (errno == EINTR || errno == EAGAIN)
+                if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
                     continue;
                 else
                     break;
             } else if (ret == 0)
                 break;
             else
-                *(client_to_server.buf + total++) = ch;
+                p += ret;
 
             if (strstr(client_to_server.buf, "\r\n\r\n"))
                 break;
         }
-        if (sscanf(client_to_server.buf, "CONNECT %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
-            if (sscanf(client_to_server.buf, "GET %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
-                if (sscanf(client_to_server.buf, "POST %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
-                    perror("Unknown connection.");
-                    goto exit_label;
-                }
-            }
-        } else
-            https = 1;
+        for (char *p = client_to_server.buf; p; p += 1)
+        {
+            if (sscanf(p, "Host: %[^ \r\n]\r\n", url) == 1 ||
+                sscanf(p, "host: %[^ \r\n]\r\n", url) == 1)
+                break;
+
+            p = strchr(p, '\n');
+        }
+        if (strstr(client_to_server.buf, "CONNECT ")) https = 1;
     } else
         snprintf(
             url,
@@ -131,12 +130,15 @@ void *handle_connection(void *_fd) {
             ntohs(destination_addr.sin_port)
         );
 
-    if (!strncmp(url, "http://", 7))
+    if (*url == 0)
+        goto exit_label;
+
+    if (!strchr(url, ':'))
     {
-        memcpy(url, url + 7, total - 7);
-        if (strchr(url, '/'))
-            *strchr(url, '/') = '\0';
-        strcat(url, ":80\0");
+        if (https)
+            strcat(url, ":443");
+        else
+            strcat(url, ":80");
     }
 
     if (LOG)
@@ -147,9 +149,9 @@ void *handle_connection(void *_fd) {
         fprintf(stderr, "%s\n", "\x1b[31mURL ERROR\x1b[0m");
         goto exit_label;
     }
+
     if ((server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
         perror("Create socket for zl");
-        close(server_fd);
         goto exit_label;
     }
     set_socket_timeout(server_fd, 0, TIMEOUT);
@@ -178,6 +180,12 @@ void *handle_connection(void *_fd) {
     );
     memset(server_to_client.buf, '\0', SIZE);
     recv(server_fd, server_to_client.buf, 39, 0);
+    if (!strstr(server_to_client.buf, "\r\n\r\n"))
+    {
+        fprintf(stderr, "Connection is not established.\n");
+        close(server_fd);
+        goto exit_label;
+    }
     if (https)
         send(
             *client_to_server.source,
