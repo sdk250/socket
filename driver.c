@@ -1,13 +1,16 @@
 #include "thread_socket.h"
 
-void signal_terminate(int sign) {
+void signal_terminate(int sign)
+{
     pthread_attr_destroy(&attr);
     close(local_fd);
     SHUTDOWN = 1;
+    fprintf(stderr, "Receive terminated signal: %d\n", sign);
     exit(EXIT_SUCCESS);
 }
 
-void usage(const char *argv, int ret) {
+void usage(const char *argv, int ret)
+{
     printf("Usage of %s:\n"
         "\t-p\t<PORT>\n"
             "\t\tSet PORT while running\n"
@@ -23,8 +26,11 @@ void usage(const char *argv, int ret) {
     exit(ret);
 }
 
-void main_loop(int local_fd) {
-    for (pthread_t tid = 0; SHUTDOWN == 0;) {
+void main_loop(int local_fd)
+{
+    for (; SHUTDOWN == 0;)
+    {
+        pthread_t tid;
         int *client_fd = (int *) malloc(sizeof(int));
         *client_fd = accept(local_fd, (struct sockaddr *) NULL, &len);
         pthread_create(&tid, &attr, handle_connection, client_fd);
@@ -32,7 +38,8 @@ void main_loop(int local_fd) {
     }
 }
 
-void set_socket_timeout(int fd, unsigned long int usec, unsigned int sec) {
+void set_socket_timeout(int fd, unsigned long int usec, unsigned int sec)
+{
     struct timeval tv = {
         .tv_usec = usec,
         .tv_sec = sec
@@ -44,18 +51,17 @@ void set_socket_timeout(int fd, unsigned long int usec, unsigned int sec) {
         (void *) &tv,
         sizeof(struct timeval)
     );
-    tv.tv_usec = usec;
-    tv.tv_sec = sec;
     setsockopt(
         fd,
         SOL_SOCKET,
         SO_RCVTIMEO,
         (void *) &tv,
-        sizeof(tv)
+        sizeof(struct timeval)
     );
 }
 
-void *handle_connection(void *_fd) {
+void *handle_connection(void *_fd)
+{
     int server_fd = 0, https = 0;
     long int total = 0;
     struct sockaddr_in server_addr = {0}, destination_addr = {0};
@@ -70,7 +76,7 @@ void *handle_connection(void *_fd) {
     client_to_server.buf = (char *) malloc(sizeof(char) * SIZE);
     server_to_client.buf = (char *) malloc(sizeof(char) * SIZE);
     url = (char *) malloc(sizeof(char) * LEN_URL);
-    set_socket_timeout(*(client_to_server.source), 0, TIMEOUT);
+    set_socket_timeout(*client_to_server.source, 0, TIMEOUT);
     pthread_mutex_init(&lock, NULL);
 
     if (! client_to_server.buf || ! server_to_client.buf || ! url)
@@ -88,7 +94,7 @@ void *handle_connection(void *_fd) {
         SO_ORIGINAL_DST,
         &destination_addr,
         &len
-    ) < 0 || (
+    ) != 0 || (
         (ntohl(destination_addr.sin_addr.s_addr) == 0x0) || // 0.0.0.0/0
         (ntohl(destination_addr.sin_addr.s_addr) & 0xff000000) == 0x0a000000 || // 10.0.0.0/8
         (ntohl(destination_addr.sin_addr.s_addr) & 0xfff00000) == 0xac100000 || // 172.16.0.0/12
@@ -97,32 +103,39 @@ void *handle_connection(void *_fd) {
         (ntohl(destination_addr.sin_addr.s_addr) & 0xffff0000) == 0xa9fe0000 || // 169.254.0.0/16
         (ntohl(destination_addr.sin_addr.s_addr) & 0xf0000000) == 0xe0000000 // 224.0.0.0/4
     )) {
-        for (char *p = client_to_server.buf; p - client_to_server.buf <= SIZE;) {
-            short int ret = recv(*client_to_server.source, p, 0xFF, 0);
-            if (ret == -1) {
+        for (short int ret = 0;
+            total + READ_SIZE < SIZE &&
+            ! strstr(client_to_server.buf, "\r\n\r\n") &&
+            (ret = recv(*client_to_server.source, client_to_server.buf + total, READ_SIZE, 0));
+        )
+        {
+            if (ret == -1)
+            {
                 if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
                     continue;
                 else
                     break;
-            } else if (ret == 0)
-                break;
-            else {
-                p += ret;
+            } else
                 total += ret;
-            }
-
-            if (strstr(client_to_server.buf, "\r\n\r\n"))
-                break;
         }
-        for (char *p = client_to_server.buf; p; p += 1)
+        for (char *p = client_to_server.buf; p && p - client_to_server.buf < SIZE; p += 1)
         {
-            if (sscanf(p, "Host: %[^ \r\n]\r\n", url) == 1 ||
-                sscanf(p, "host: %[^ \r\n]\r\n", url) == 1)
+            if (sscanf(p, "Host: %" LEN_URL_STR "[^ \r\n]\r\n", url) == 1 ||
+                sscanf(p, "host: %" LEN_URL_STR "[^ \r\n]\r\n", url) == 1
+            )
                 break;
 
             p = strchr(p, '\n');
         }
-        if (strstr(client_to_server.buf, "CONNECT ")) https = 1;
+        for (int i = 0; i < 8; i++)
+        {
+            if (client_to_server.buf[i] == "CONNECT "[i])
+                https = 1;
+            else {
+                https = 0;
+                break;
+            }
+        }
     } else
         snprintf(
             url,
@@ -132,8 +145,7 @@ void *handle_connection(void *_fd) {
             ntohs(destination_addr.sin_port)
         );
 
-    if (*url == 0)
-        goto exit_label;
+    if (*url == 0) goto exit_label;
 
     if (!strchr(url, ':'))
     {
@@ -143,8 +155,7 @@ void *handle_connection(void *_fd) {
             strcat(url, ":80");
     }
 
-    if (LOG)
-        printf("URL: %s\n", url);
+    if (LOG) printf("URL: %s\n", url);
 
     if (strstr(url, ip))
     {
@@ -164,14 +175,15 @@ void *handle_connection(void *_fd) {
 
     if (connect(server_fd,
         (struct sockaddr *) &server_addr,
-        sizeof(server_addr)) < 0
+        sizeof(server_addr)) != 0
     ) {
         perror("Connect zl");
         close(server_fd);
         goto exit_label;
     }
-    sprintf(
+    snprintf(
         server_to_client.buf,
+        SIZE,
         "CONNECT %s HTTP/1.1\r\n\r\n",
         url
     );
@@ -180,11 +192,16 @@ void *handle_connection(void *_fd) {
         strlen(server_to_client.buf),
         MSG_NOSIGNAL
     );
-    memset(server_to_client.buf, '\0', SIZE);
-    recv(server_fd, server_to_client.buf, 39, 0);
-    if (!strstr(server_to_client.buf, "\r\n\r\n"))
+    memset(server_to_client.buf, '\0', strlen(server_to_client.buf));
+    for (
+        short int i = 0, end_i = 39;
+        (i = recv(server_fd, server_to_client.buf, end_i, 0)) != end_i && i > 0;
+        end_i -= i
+    ) continue;
+    if (! strstr(server_to_client.buf, "\r\n\r\n"))
     {
         fprintf(stderr, "Connection is not established.\n");
+        shutdown(server_fd, SHUT_RDWR);
         close(server_fd);
         goto exit_label;
     }
@@ -202,9 +219,6 @@ void *handle_connection(void *_fd) {
             total,
             MSG_NOSIGNAL
         );
-
-    memset(client_to_server.buf, '\0', SIZE);
-    memset(server_to_client.buf, '\0', SIZE);
 
     pthread_create(&t1, NULL, swap_data, &client_to_server);
     pthread_create(&t2, NULL, swap_data, &server_to_client);
@@ -226,8 +240,10 @@ exit_label:
     return NULL;
 }
 
-void *swap_data(void *par) {
+void *swap_data(void *par)
+{
     struct sock_argu *arg_ = (struct sock_argu *) par;
+    memset(arg_->buf, '\0', SIZE);
 
     for (long int n = 0; (n = recv(*arg_->source, arg_->buf, SIZE, 0)); )
     {
@@ -244,13 +260,14 @@ void *swap_data(void *par) {
         memset(arg_->buf, '\0', n);
     }
 
-    shutdown(*arg_->dest, SHUT_WR);
-    shutdown(*arg_->source, SHUT_WR);
+    shutdown(*arg_->dest, SHUT_RDWR);
+    shutdown(*arg_->source, SHUT_RDWR);
     pthread_exit(NULL);
     return NULL;
 }
 
-int setNonBlocking(int sockfd) {
+int setNonBlocking(int sockfd)
+{
     int flags = fcntl(sockfd, F_GETFL, 0);
     if (flags == -1) {
         perror("fcntl");

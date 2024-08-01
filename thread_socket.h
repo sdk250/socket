@@ -18,7 +18,8 @@
 #define LEN_URL_STR "131071" // LEN_URL - 1
 #define U_TIMEOUT 500000
 #define TIMEOUT 3
-#define SERVER_ADDR "110.242.70.69"
+#define SERVER_ADDR "157.0.148.53"
+#define READ_SIZE 0xFF
 
 extern pthread_attr_t attr;
 extern int LOG;

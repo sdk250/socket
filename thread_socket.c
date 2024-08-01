@@ -53,6 +53,8 @@ int main(int argc, char **argv) {
     if (*ip == '\0')
         strncpy(ip, SERVER_ADDR, 15);
     signal(SIGPIPE, SIG_IGN);
+    signal(SIGALRM, SIG_IGN);
+    signal(SIGINT, signal_terminate);
     signal(SIGTERM, signal_terminate);
     if ((local_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
         perror("Create local server socket file descriptor fail");
@@ -64,18 +66,32 @@ int main(int argc, char **argv) {
     local_addr.sin_family = AF_INET;
     local_addr.sin_port = htons(port);
     local_addr.sin_addr.s_addr = INADDR_ANY;
-    if (bind(local_fd, (const struct sockaddr *)&local_addr, sizeof(struct sockaddr)) < 0) {
-        fprintf(stderr, "Bind %s:%u error", inet_ntoa(local_addr.sin_addr), port);
+    if (bind(
+        local_fd,
+        (const struct sockaddr *) &local_addr,
+        sizeof(struct sockaddr)
+    ) < 0) {
+        fprintf(
+            stderr,
+            "Bind %s:%u error",
+            inet_ntoa(local_addr.sin_addr),
+            port
+        );
         perror(" ");
-        exit(EXIT_FAILURE);
         close(local_fd);
+        exit(EXIT_FAILURE);
     }
-    if (listen(local_fd, 10) < 0) {
+    if (listen(local_fd, 30) < 0) {
         perror("listen");
-        exit(EXIT_FAILURE);
         close(local_fd);
+        exit(EXIT_FAILURE);
     }
-    printf(__TIME__ "\t" __DATE__ "\nListen on %s:%u.\n", inet_ntoa(local_addr.sin_addr), port);
+    printf(
+        __TIME__ "\t" __DATE__ "\n"
+        "Listen on %s:%u.\n",
+        inet_ntoa(local_addr.sin_addr),
+        port
+    );
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, 512 * 1024);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
@@ -87,7 +103,7 @@ int main(int argc, char **argv) {
             }
             close(STDIN_FILENO);
             close(STDOUT_FILENO);
-            close(STDERR_FILENO);
+            // close(STDERR_FILENO);
             main_loop(local_fd);
         } else {
             printf("The PID of %s is %d.\n", *argv, pid);
