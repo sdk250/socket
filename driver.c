@@ -32,7 +32,7 @@ void main_loop(int local_fd)
     {
         pthread_t tid;
         int *client_fd = (int *) malloc(sizeof(int));
-        *client_fd = accept(local_fd, (struct sockaddr *) NULL, &len);
+        *client_fd = accept(local_fd, (struct sockaddr *) NULL, (socklen_t *) NULL);
         pthread_create(&tid, &attr, handle_connection, client_fd);
         pthread_detach(tid);
     }
@@ -69,6 +69,7 @@ void *handle_connection(void *_fd)
     char *url = NULL;
     pthread_t t1 = 0, t2 = 0;
     pthread_mutex_t lock;
+    socklen_t len = sizeof(destination_addr);
 
     client_to_server.source = server_to_client.dest = (int *) _fd;
     client_to_server.dest = server_to_client.source = &server_fd;
@@ -163,7 +164,8 @@ void *handle_connection(void *_fd)
         goto exit_label;
     }
 
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
+    {
         perror("Create socket for zl");
         goto exit_label;
     }
@@ -247,7 +249,8 @@ void *swap_data(void *par)
 
     for (long int n = 0; (n = recv(*arg_->source, arg_->buf, SIZE, 0)); )
     {
-        if (n < 0) {
+        if (n < 0)
+        {
             if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
                 continue;
             else

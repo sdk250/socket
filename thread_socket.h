@@ -27,8 +27,6 @@ extern int local_fd;
 extern char ip[16];
 extern int SHUTDOWN;
 
-static socklen_t len = sizeof(struct sockaddr);
-
 struct sock_argu {
     int *source;
     int *dest;
