@@ -19,11 +19,13 @@ clang -m64 -O3 -Wall -lpthread -o thread_socket thread_socket.c driver.c
 Usage of ./thread_socket:
         -p      <PORT>
                 Set PORT while running
-        -l      Show running log
         -u      <UID>
                 Set UID while running
         -r      <SERVER ADDRESS>
                 Set IP of peer
+        -H      <HOST>
+                Set host of local connection
+        -l      Show running log
         -d      Start daemon service
         -h      Show this message
 ```
