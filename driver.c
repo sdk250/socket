@@ -18,6 +18,8 @@ void usage(const char *argv, int ret)
             "\t\tSet UID while running\n"
         "\t-r\t<SERVER ADDRESS>\n"
             "\t\tSet IP of peer\n"
+        "\t-H\t<HOST>\n"
+            "\t\tSet host of local connection\n"
         "\t-l\tShow running log\n"
         "\t-d\tStart daemon service\n"
         "\t-h\tShow this message\n",
@@ -186,8 +188,9 @@ void *handle_connection(void *_fd)
     snprintf(
         server_to_client.buf,
         SIZE,
-        "CONNECT %s HTTP/1.1\r\n\r\n",
-        url
+        "CONNECT %s@%s HTTP/1.1\r\n\r\n",
+        url,
+        *HOST == 0 ? "cloudnproxy.baidu.com" : HOST
     );
     send(server_fd,
         server_to_client.buf,

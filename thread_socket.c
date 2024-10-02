@@ -3,7 +3,7 @@
 pthread_attr_t attr = {0};
 int LOG = 0;
 int local_fd = 0;
-char ip[16] = {0};
+char ip[16] = {0}, HOST[READ_SIZE] = {0};
 int SHUTDOWN = 0;
 
 int main(int argc, char **argv) {
@@ -17,7 +17,7 @@ int main(int argc, char **argv) {
 
     if (argc == 1)
         usage(*argv, EXIT_FAILURE);
-    for (;(opt = getopt(argc, argv, "p:u:r:dlh")) != -1;) {
+    for (;(opt = getopt(argc, argv, "p:u:r:H:dlh")) != -1;) {
         switch(opt) {
             case 'p':
                 port = atoi(optarg);
@@ -34,6 +34,9 @@ int main(int argc, char **argv) {
                 break;
             case 'r':
                 strncpy(ip, optarg, 15);
+                break;
+            case 'H':
+                strncpy(HOST, optarg, READ_SIZE);
                 break;
             case 'h':
                 usage(*argv, EXIT_SUCCESS);

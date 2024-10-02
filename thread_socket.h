@@ -24,7 +24,7 @@
 extern pthread_attr_t attr;
 extern int LOG;
 extern int local_fd;
-extern char ip[16];
+extern char ip[16], HOST[READ_SIZE];
 extern int SHUTDOWN;
 
 struct sock_argu {
