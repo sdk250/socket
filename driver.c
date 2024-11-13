@@ -119,7 +119,7 @@ void *handle_connection(void *_fd)
             } else
                 total += ret;
         }
-        for (char *p = client_to_server.buf; p != 1 && p - client_to_server.buf < SIZE; p++)
+        for (char *p = client_to_server.buf; (uintptr_t) p != 1 && p - client_to_server.buf < SIZE; p++)
         {
             if (sscanf(p, "Host: %" LEN_URL_STR "[^ \r\n]\r\n", url) == 1 ||
                 sscanf(p, "host: %" LEN_URL_STR "[^ \r\n]\r\n", url) == 1
