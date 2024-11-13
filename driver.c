@@ -128,6 +128,17 @@ void *handle_connection(void *_fd)
 
             p = strchr(p, '\n');
         }
+        if (*url == 0)
+        {
+            if (sscanf(client_to_server.buf, "CONNECT %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
+                if (sscanf(client_to_server.buf, "GET %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
+                    if (sscanf(client_to_server.buf, "POST %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
+                        perror("Unknown connection.");
+                        goto exit_label;
+                    }
+                }
+            }
+        }
         for (int i = 0; i < 8; i++)
         {
             if (client_to_server.buf[i] == "CONNECT "[i])
