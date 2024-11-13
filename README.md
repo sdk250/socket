@@ -31,5 +31,5 @@ Usage of ./thread_socket:
 使用的最直接的使用方法就是运行后在手机的APN设置里面设置代理:<br>
 127.0.0.1 端口 默认为8080
 # Email
-` 520sdk250@gmail.com `
+` hexfya@gmail.com `
 
