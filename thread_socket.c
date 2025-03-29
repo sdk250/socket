@@ -4,7 +4,7 @@ pthread_attr_t attr = {0};
 int LOG = 0;
 int local_fd = 0;
 char ip[16] = {0};
-int SHUTDOWN = 0;
+atomic_bool SHUTDOWN = false;
 
 int main(int argc, char **argv) {
     struct sockaddr_in local_addr = {0};
@@ -81,7 +81,7 @@ int main(int argc, char **argv) {
         close(local_fd);
         exit(EXIT_FAILURE);
     }
-    if (listen(local_fd, 30) < 0) {
+    if (listen(local_fd, 50) < 0) {
         perror("listen");
         close(local_fd);
         exit(EXIT_FAILURE);
@@ -114,4 +114,3 @@ int main(int argc, char **argv) {
 
     return 0;
 }
-
