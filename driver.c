@@ -38,8 +38,8 @@ void *handle_swap(void *arg)
         {
             if (events[i].events & EPOLLIN)
             {
-                uint32_t src = *(uint32_t *) &events[i].data.u64;
-                uint32_t dst = *(((uint32_t *) &events[i].data.u64) + 1);
+                int32_t src = *(int32_t *) &events[i].data.u64;
+                int32_t dst = *(((int32_t *) &events[i].data.u64) + 1);
                 bool _continue = false;
 
                 int recved = 0;
@@ -84,6 +84,7 @@ void *handle_server(void *arg)
             struct server_argu *server_ptr = (struct server_argu *) events[i].data.ptr;
             int32_t src = server_ptr->src;
             int32_t dst = server_ptr->dst;
+
             if (events[i].events & EPOLLOUT)
             {
                 send(
@@ -109,12 +110,12 @@ void *handle_server(void *arg)
                 ) continue;
                 if (! strstr(buf, "\r\n\r\n"))
                 {
-                    fprintf(stderr, "Connection is not established: \n");
                     memset(buf, '\0', strlen(buf));
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, dst, NULL);
                     shutdown(dst, SHUT_RDWR);
                     close(dst);
-                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, dst, NULL);
                     close(src);
+                    free(server_ptr);
                     continue;
                 }
 
@@ -192,76 +193,115 @@ void main_loop(const int local_fd)
             {
                 int _fd = accept(fd, NULL, NULL);
                 if (_fd < 0)
-                {
-                    puts("?");
                     continue;
-                }
+
                 setNonBlocking(_fd);
                 event.events = EPOLLIN | EPOLLET;
                 event.data.fd = _fd;
                 epoll_ctl(epoll_fd, EPOLL_CTL_ADD, _fd, &event);
             } else if (events[i].events & EPOLLIN) {
-                int total = 0, https = 0;
-                for (short int ret = 0;
-                    total + READ_SIZE < SIZE &&
-                    ! strstr(buf, "\r\n\r\n") &&
-                    (ret = recv(fd, buf + total, READ_SIZE, 0));
-                )
-                {
-                    if (ret == -1)
-                    {
-                        // if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
-                            // continue;
-                        // else
-                            break;
-                    } else
-                        total += ret;
-                }
+                int total = 0, https = 0, dst = 0;
+                struct sockaddr_in server_addr, destination_addr;
+                socklen_t len = sizeof(struct sockaddr);
 
-                for (char *p = buf; (uintptr_t) p != 1 && p - buf < SIZE; p++)
-                {
-                    if (sscanf(p, "Host: %" LEN_URL_STR "[^ \r\n]\r\n", url) == 1 ||
-                        sscanf(p, "host: %" LEN_URL_STR "[^ \r\n]\r\n", url) == 1
+                memset(&destination_addr, '\0', sizeof(struct sockaddr));
+                if (getsockopt(
+                    fd,
+                    SOL_IP,
+                    SO_ORIGINAL_DST,
+                    &destination_addr,
+                    &len
+                ) != 0 || (
+                    (ntohl(destination_addr.sin_addr.s_addr) == 0x0) || // 0.0.0.0/0
+                    (ntohl(destination_addr.sin_addr.s_addr) & 0xff000000) == 0x0a000000 || // 10.0.0.0/8
+                    (ntohl(destination_addr.sin_addr.s_addr) & 0xfff00000) == 0xac100000 || // 172.16.0.0/12
+                    (ntohl(destination_addr.sin_addr.s_addr) & 0xffff0000) == 0xc0a80000 || // 192.168.0.0/16
+                    (ntohl(destination_addr.sin_addr.s_addr) & 0xff000000) == 0x7f000000 || // 127.0.0.0/8
+                    (ntohl(destination_addr.sin_addr.s_addr) & 0xffff0000) == 0xa9fe0000 || // 169.254.0.0/16
+                    (ntohl(destination_addr.sin_addr.s_addr) & 0xf0000000) == 0xe0000000 // 224.0.0.0/4
+                )) {
+                    for (short int ret = 0;
+                        total + READ_SIZE < SIZE &&
+                        ! strstr(buf, "\r\n\r\n") &&
+                        (ret = recv(fd, buf + total, READ_SIZE, 0));
                     )
-                        break;
-
-                    p = strchr(p, '\n');
-                }
-                if (*url == 0)
-                {
-                    if (sscanf(buf, "CONNECT %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
-                        if (sscanf(buf, "GET %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
-                            if (sscanf(buf, "POST %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
-                                perror("Unknown connection.");
-                                memset(buf, '\0', strlen(buf));
-                                memset(url, '\0', strlen(url));
-                                epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
-                                close(fd);
-                                continue;
+                    {
+                        if (ret == -1)
+                            break;
+                        else
+                            total += ret;
+                    }
+    
+                    for (char *p = buf; (uintptr_t) p != 1 && p - buf < SIZE; p++)
+                    {
+                        if (sscanf(p, "Host: %" LEN_URL_STR "[^ \r\n]\r\n", url) == 1 ||
+                            sscanf(p, "host: %" LEN_URL_STR "[^ \r\n]\r\n", url) == 1
+                        )
+                            break;
+    
+                        p = strchr(p, '\n');
+                    }
+                    if (*url == 0)
+                    {
+                        if (sscanf(buf, "CONNECT %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
+                            if (sscanf(buf, "GET %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
+                                if (sscanf(buf, "POST %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
+                                    perror("Unknown connection.");
+                                    memset(buf, '\0', strlen(buf));
+                                    memset(url, '\0', strlen(url));
+                                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+                                    close(fd);
+                                    continue;
+                                }
                             }
                         }
                     }
-                }
-                for (int i = 0; i < 8; i++)
-                {
-                    if (buf[i] == "CONNECT "[i])
-                        https = 1;
-                    else {
-                        https = 0;
-                        break;
+                    for (int i = 0; i < 8; i++)
+                    {
+                        if (buf[i] == "CONNECT "[i])
+                            https = 1;
+                        else {
+                            https = 0;
+                            break;
+                        }
                     }
+                    if (!strchr(url, ':'))
+                    {
+                        if (https)
+                            strncat(url, ":443", LEN_URL);
+                        else
+                            strncat(url, ":80", LEN_URL);
+                    }
+                } else {
+                    if (! inet_ntop(AF_INET, &destination_addr.sin_addr, url, INET_ADDRSTRLEN))
+                    {
+                        perror("Translation fail");
+                        memset(buf, '\0', strlen(buf));
+                        memset(url, '\0', strlen(url));
+                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+                        close(fd);
+                        continue;
+                    }
+                    size_t len = strlen(url);
+                    if (len + 7 > LEN_URL)
+                    {
+                        fprintf(stderr, "URI is too long: %s\n", url);
+                        memset(buf, '\0', strlen(buf));
+                        memset(url, '\0', strlen(url));
+                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+                        close(fd);
+                        continue;
+                    }
+                    snprintf(
+                        url + len,
+                        LEN_URL,
+                        ":%u",
+                        ntohs(destination_addr.sin_port)
+                    );
                 }
-                if (!strchr(url, ':'))
-                {
-                    if (https)
-                        strncat(url, ":443", LEN_URL);
-                    else
-                        strncat(url, ":80", LEN_URL);
-                }
+
                 if (LOG) printf("url: %s\n", url);
 
-                int dst = 0;
-                struct sockaddr_in server_addr;
                 memset(&server_addr, '\0', sizeof(struct sockaddr));
                 if ((dst = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
                 {
@@ -273,7 +313,7 @@ void main_loop(const int local_fd)
                     continue;
                 }
                 setNonBlocking(dst);
-                // set_socket_timeout(args.dest, 0, TIMEOUT);
+                set_socket_timeout(dst, 0, TIMEOUT);
 
                 server_addr.sin_family = AF_INET;
                 server_addr.sin_port = htons(443);
@@ -288,7 +328,8 @@ void main_loop(const int local_fd)
                     continue;
                 }
 
-                if (connect(dst,
+                if (connect(
+                    dst,
                     (struct sockaddr *) &server_addr,
                     sizeof(struct sockaddr)) == -1 && errno != EINPROGRESS
                 ) {
@@ -331,11 +372,10 @@ void main_loop(const int local_fd)
                 memset(_buf, '\0', strlen(_buf));
                 memset(url, '\0', strlen(url));
                 epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
-                // close(fd);
-
             }
         }
     }
+
     close(epoll_fd);
     pthread_join(tid_swap, NULL);
     pthread_join(tid_server, NULL);
