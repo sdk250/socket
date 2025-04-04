@@ -24,18 +24,330 @@ void usage(const char *argv, const int ret)
     exit(ret);
 }
 
+void *handle_swap(void *arg)
+{
+    int32_t epoll_fd = *(int32_t *) arg;
+    char *buf = (char *) arg;
+    memset(buf, '\0', sizeof(int32_t));
+    struct epoll_event events[MAX_EVENT];
+
+    for (int event_count = 0; !atomic_load(&SHUTDOWN);)
+    {
+        event_count = epoll_wait(epoll_fd, events, MAX_EVENT, -1);
+        for (int i = 0; i < event_count; i++)
+        {
+            if (events[i].events & EPOLLIN)
+            {
+                uint32_t src = *(uint32_t *) &events[i].data.u64;
+                uint32_t dst = *(((uint32_t *) &events[i].data.u64) + 1);
+                bool _continue = false;
+
+                int recved = 0;
+                for (;
+                    (recved = recv(src, buf, SIZE, 0));
+                )
+                {
+                    if (recved < 0)
+                    {
+                        _continue = (errno == EAGAIN || errno == EWOULDBLOCK);
+                        break;
+                    }
+                    send(dst, buf, recved, MSG_NOSIGNAL);
+                    memset(buf, '\0', recved);
+                }
+                if (!_continue || recved == 0)
+                {
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, src, NULL);
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, dst, NULL);
+                    close(src);
+                    close(dst);
+                }
+            }
+        }
+    }
+    pthread_exit(NULL);
+    return NULL;
+}
+void *handle_server(void *arg)
+{
+    int32_t epoll_fd = *(int32_t *) arg;
+    int32_t swap_epoll_fd = *(((int32_t *) arg) + 1);
+    char *buf = (char *) arg;
+    memset(buf, '\0', sizeof(int64_t));
+    struct epoll_event event, events[MAX_EVENT];
+
+    for (int event_count = 0; !atomic_load(&SHUTDOWN);)
+    {
+        event_count = epoll_wait(epoll_fd, events, MAX_EVENT, -1);
+        for (int i = 0; i < event_count; i++)
+        {
+            struct server_argu *server_ptr = (struct server_argu *) events[i].data.ptr;
+            int32_t src = server_ptr->src;
+            int32_t dst = server_ptr->dst;
+            if (events[i].events & EPOLLOUT)
+            {
+                send(
+                    dst,
+                    server_ptr->msg,
+                    strlen(server_ptr->msg),
+                    MSG_NOSIGNAL
+                );
+
+                free(server_ptr->msg);
+                server_ptr->msg = NULL;
+
+                memset(&event, '\0', sizeof(struct epoll_event));
+                event.events = EPOLLIN | EPOLLET;
+                event.data.ptr = events[i].data.ptr;
+                events[i].data.ptr = NULL;
+                epoll_ctl(epoll_fd, EPOLL_CTL_MOD, dst, &event);
+            } else if (events[i].events & EPOLLIN) {
+                for (
+                    short int i = 0, end_i = 39;
+                    (i = recv(dst, buf, end_i, 0)) != end_i && i > 0;
+                    end_i -= i
+                ) continue;
+                if (! strstr(buf, "\r\n\r\n"))
+                {
+                    fprintf(stderr, "Connection is not established: \n");
+                    memset(buf, '\0', strlen(buf));
+                    shutdown(dst, SHUT_RDWR);
+                    close(dst);
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, dst, NULL);
+                    close(src);
+                    continue;
+                }
+
+                if (server_ptr->http_msg == NULL)
+                    send(
+                        src,
+                        buf,
+                        strlen(buf),
+                        MSG_NOSIGNAL
+                    );
+                else
+                    send(
+                        dst,
+                        server_ptr->http_msg,
+                        strlen(server_ptr->http_msg),
+                        MSG_NOSIGNAL
+                    );
+                memset(buf, '\0', strlen(buf));
+                epoll_ctl(epoll_fd, EPOLL_CTL_DEL, dst, NULL);
+                free(server_ptr);
+
+                memset(&event, '\0', sizeof(struct epoll_event));
+                *(int32_t *) &event.data.u64 = src;
+                *(((int32_t *) &event.data.u64) + 1) = dst;
+                event.events = EPOLLIN | EPOLLET;
+                epoll_ctl(swap_epoll_fd, EPOLL_CTL_ADD, src, &event);
+
+                memset(&event, '\0', sizeof(struct epoll_event));
+                *(int32_t *) &event.data.u64 = dst;
+                *(((int32_t *) &event.data.u64) + 1) = src;
+                event.events = EPOLLIN | EPOLLET;
+                epoll_ctl(swap_epoll_fd, EPOLL_CTL_ADD, dst, &event);
+            }
+        }
+    }
+    pthread_exit(NULL);
+    return NULL;
+}
 void main_loop(const int local_fd)
 {
+    int epoll_fd, event_count;
+    struct epoll_event event, events[MAX_EVENT];
+    char *thread_buf_swap = calloc(SIZE, sizeof(char));
+    char *thread_buf_server = calloc(SIZE, sizeof(char));
+    char *buf = calloc(SIZE, sizeof(char));
+    char *_buf = calloc(SIZE, sizeof(char));
+    char *url = calloc(LEN_URL, sizeof(char));
+    if (! thread_buf_swap || ! buf || ! _buf || ! thread_buf_server || ! url)
+    {
+        perror("calloc");
+        exit(EXIT_FAILURE);
+    }
+
+    epoll_fd = epoll_create1(0);
+    int32_t swap_epoll_fd = epoll_create1(0);
+    int32_t server_epoll_fd = epoll_create1(0);
+    *(int32_t *) thread_buf_swap = swap_epoll_fd;
+    *(int32_t *) thread_buf_server = server_epoll_fd;
+    *(((int32_t *) thread_buf_server) + 1) = swap_epoll_fd;
+    pthread_t tid_swap, tid_server;
+    pthread_create(&tid_swap, &attr, handle_swap, thread_buf_swap);
+    pthread_create(&tid_server, &attr, handle_server, thread_buf_server);
+    // pthread_detach(tid_swap);
+
+    event.events = EPOLLIN;
+    event.data.fd = local_fd;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, local_fd, &event);
     for (; !atomic_load(&SHUTDOWN);)
     {
-        pthread_t tid;
-        int *client_fd = (int *) malloc(sizeof(int));
-        if (client_fd == NULL) continue;
-        *client_fd = accept(local_fd, (struct sockaddr *) NULL, (socklen_t *) NULL);
-        pthread_create(&tid, &attr, handle_connection, client_fd);
-        pthread_detach(tid);
+        event_count = epoll_wait(epoll_fd, events, MAX_EVENT, -1);
+        for (int i = 0; i < event_count; i++)
+        {
+            int fd = events[i].data.fd;
+            if (fd == local_fd)
+            {
+                int _fd = accept(fd, NULL, NULL);
+                if (_fd < 0)
+                {
+                    puts("?");
+                    continue;
+                }
+                setNonBlocking(_fd);
+                event.events = EPOLLIN | EPOLLET;
+                event.data.fd = _fd;
+                epoll_ctl(epoll_fd, EPOLL_CTL_ADD, _fd, &event);
+            } else if (events[i].events & EPOLLIN) {
+                int total = 0, https = 0;
+                for (short int ret = 0;
+                    total + READ_SIZE < SIZE &&
+                    ! strstr(buf, "\r\n\r\n") &&
+                    (ret = recv(fd, buf + total, READ_SIZE, 0));
+                )
+                {
+                    if (ret == -1)
+                    {
+                        // if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+                            // continue;
+                        // else
+                            break;
+                    } else
+                        total += ret;
+                }
+
+                for (char *p = buf; (uintptr_t) p != 1 && p - buf < SIZE; p++)
+                {
+                    if (sscanf(p, "Host: %" LEN_URL_STR "[^ \r\n]\r\n", url) == 1 ||
+                        sscanf(p, "host: %" LEN_URL_STR "[^ \r\n]\r\n", url) == 1
+                    )
+                        break;
+
+                    p = strchr(p, '\n');
+                }
+                if (*url == 0)
+                {
+                    if (sscanf(buf, "CONNECT %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
+                        if (sscanf(buf, "GET %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
+                            if (sscanf(buf, "POST %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
+                                perror("Unknown connection.");
+                                memset(buf, '\0', strlen(buf));
+                                memset(url, '\0', strlen(url));
+                                epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+                                close(fd);
+                                continue;
+                            }
+                        }
+                    }
+                }
+                for (int i = 0; i < 8; i++)
+                {
+                    if (buf[i] == "CONNECT "[i])
+                        https = 1;
+                    else {
+                        https = 0;
+                        break;
+                    }
+                }
+                if (!strchr(url, ':'))
+                {
+                    if (https)
+                        strncat(url, ":443", LEN_URL);
+                    else
+                        strncat(url, ":80", LEN_URL);
+                }
+                if (LOG) printf("url: %s\n", url);
+
+                int dst = 0;
+                struct sockaddr_in server_addr;
+                memset(&server_addr, '\0', sizeof(struct sockaddr));
+                if ((dst = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
+                {
+                    perror("Create socket for zl");
+                    memset(buf, '\0', strlen(buf));
+                    memset(url, '\0', strlen(url));
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+                    close(fd);
+                    continue;
+                }
+                setNonBlocking(dst);
+                // set_socket_timeout(args.dest, 0, TIMEOUT);
+
+                server_addr.sin_family = AF_INET;
+                server_addr.sin_port = htons(443);
+                if (inet_pton(AF_INET, ip, &server_addr.sin_addr) != 1)
+                {
+                    perror("Translation address failed");
+                    close(dst);
+                    memset(buf, '\0', strlen(buf));
+                    memset(url, '\0', strlen(url));
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+                    close(fd);
+                    continue;
+                }
+
+                if (connect(dst,
+                    (struct sockaddr *) &server_addr,
+                    sizeof(struct sockaddr)) == -1 && errno != EINPROGRESS
+                ) {
+                    perror("Connect to server fail");
+                    close(dst);
+                    memset(buf, '\0', strlen(buf));
+                    memset(url, '\0', strlen(url));
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+                    close(fd);
+                    continue;
+                }
+                snprintf(
+                    _buf,
+                    SIZE,
+                    "CONNECT %s HTTP/1.1\r\n\r\n",
+                    url
+                );
+                memset(&event, '\0', sizeof(struct epoll_event));
+                event.events = EPOLLOUT | EPOLLET;
+                event.data.ptr = calloc(1, sizeof(struct server_argu));
+                if (event.data.ptr == NULL)
+                {
+                    perror("calloc");
+                    close(dst);
+                    memset(buf, '\0', strlen(buf));
+                    memset(_buf, '\0', strlen(_buf));
+                    memset(url, '\0', strlen(url));
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+                    close(fd);
+                    continue;
+                }
+                ((struct server_argu *) event.data.ptr)->src = fd;
+                ((struct server_argu *) event.data.ptr)->dst = dst;
+                ((struct server_argu *) event.data.ptr)->msg = strdup(_buf);
+                if (!https)
+                    ((struct server_argu *) event.data.ptr)->http_msg = strdup(buf);
+                epoll_ctl(server_epoll_fd, EPOLL_CTL_ADD, dst, &event);
+
+                memset(buf, '\0', strlen(buf));
+                memset(_buf, '\0', strlen(_buf));
+                memset(url, '\0', strlen(url));
+                epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+                // close(fd);
+
+            }
+        }
     }
+    close(epoll_fd);
+    pthread_join(tid_swap, NULL);
+    pthread_join(tid_server, NULL);
+    close(swap_epoll_fd);
+    close(server_epoll_fd);
+    free(thread_buf_swap);
+    free(thread_buf_server);
+    free(buf);
+    free(_buf);
+    free(url);
     pthread_attr_destroy(&attr);
+
     puts("Main thread terminated.");
 }
 
@@ -60,261 +372,6 @@ void set_socket_timeout(int fd, unsigned long int usec, unsigned int sec)
         sizeof(struct timeval)
     );
 }
-
-void *handle_connection(void *_fd)
-{
-    int https = 0;
-    long int total = 0;
-    struct sockaddr_in server_addr = {0}, destination_addr = {0};
-    struct sock_argu args, *_client, *_server;
-    char *url = NULL;
-    pthread_t t1 = 0, t2 = 0;
-    socklen_t len = sizeof(struct sockaddr);
-
-    args.src = *(int *) _fd;
-    args.dest = 0;
-    args.src_buf = (char *) malloc(SIZE);
-    args.dest_buf = (char *) malloc(SIZE);
-    url = (char *) malloc(LEN_URL);
-    set_socket_timeout(args.src, 0, TIMEOUT);
-
-    if (! args.src_buf || ! args.dest_buf || ! url)
-        goto exit_label;
-
-    memset(&server_addr, '\0', sizeof(struct sockaddr));
-    memset(&destination_addr, '\0', sizeof(struct sockaddr));
-    memset(args.src_buf, '\0', SIZE);
-    memset(args.dest_buf, '\0', SIZE);
-    memset(url, '\0', LEN_URL);
-
-    if (getsockopt(
-        args.src,
-        SOL_IP,
-        SO_ORIGINAL_DST,
-        &destination_addr,
-        &len
-    ) != 0 || (
-        (ntohl(destination_addr.sin_addr.s_addr) == 0x0) || // 0.0.0.0/0
-        (ntohl(destination_addr.sin_addr.s_addr) & 0xff000000) == 0x0a000000 || // 10.0.0.0/8
-        (ntohl(destination_addr.sin_addr.s_addr) & 0xfff00000) == 0xac100000 || // 172.16.0.0/12
-        (ntohl(destination_addr.sin_addr.s_addr) & 0xffff0000) == 0xc0a80000 || // 192.168.0.0/16
-        (ntohl(destination_addr.sin_addr.s_addr) & 0xff000000) == 0x7f000000 || // 127.0.0.0/8
-        (ntohl(destination_addr.sin_addr.s_addr) & 0xffff0000) == 0xa9fe0000 || // 169.254.0.0/16
-        (ntohl(destination_addr.sin_addr.s_addr) & 0xf0000000) == 0xe0000000 // 224.0.0.0/4
-    )) {
-        for (short int ret = 0;
-            total + READ_SIZE < SIZE &&
-            ! strstr(args.src_buf, "\r\n\r\n") &&
-            (ret = recv(args.src, args.src_buf + total, READ_SIZE, 0));
-        )
-        {
-            if (ret == -1)
-            {
-                if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
-                    continue;
-                else
-                    break;
-            } else
-                total += ret;
-        }
-        for (char *p = args.src_buf; (uintptr_t) p != 1 && p - args.src_buf < SIZE; p++)
-        {
-            if (sscanf(p, "Host: %" LEN_URL_STR "[^ \r\n]\r\n", url) == 1 ||
-                sscanf(p, "host: %" LEN_URL_STR "[^ \r\n]\r\n", url) == 1
-            )
-                break;
-
-            p = strchr(p, '\n');
-        }
-        if (*url == 0)
-        {
-            if (sscanf(args.src_buf, "CONNECT %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
-                if (sscanf(args.src_buf, "GET %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
-                    if (sscanf(args.src_buf, "POST %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
-                        perror("Unknown connection.");
-                        goto exit_label;
-                    }
-                }
-            }
-        }
-        for (int i = 0; i < 8; i++)
-        {
-            if (args.src_buf[i] == "CONNECT "[i])
-                https = 1;
-            else {
-                https = 0;
-                break;
-            }
-        }
-    } else {
-        if (! inet_ntop(AF_INET, &destination_addr.sin_addr, url, INET_ADDRSTRLEN))
-        {
-            perror("Translation fail");
-            goto exit_label;
-        }
-        size_t len = strlen(url);
-        if (len + 7 > LEN_URL)
-        {
-            fprintf(stderr, "URI is too long.");
-            goto exit_label;
-        }
-        snprintf(
-            url + len,
-            LEN_URL,
-            ":%u",
-            ntohs(destination_addr.sin_port)
-        );
-    }
-
-    if (*url == 0) goto exit_label;
-
-    if (!strchr(url, ':'))
-    {
-        if (https)
-            strcat(url, ":443");
-        else
-            strcat(url, ":80");
-    }
-
-    if (LOG) printf("URL: %s\n", url);
-
-    if (strstr(url, ip))
-    {
-        fprintf(stderr, "%s\n", "\x1b[31mURL ERROR\x1b[0m");
-        goto exit_label;
-    }
-
-    if ((args.dest = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
-    {
-        perror("Create socket for zl");
-        goto exit_label;
-    }
-    set_socket_timeout(args.dest, 0, TIMEOUT);
-
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(443);
-    if (inet_pton(AF_INET, ip, &server_addr.sin_addr) != 1)
-    {
-        perror("Translation address failed");
-        goto exit_label;
-    }
-
-    if (connect(args.dest,
-        (struct sockaddr *) &server_addr,
-        sizeof(struct sockaddr)) != 0
-    ) {
-        perror("Connect to server fail");
-        close(args.dest);
-        goto exit_label;
-    }
-    snprintf(
-        args.dest_buf,
-        SIZE,
-        "CONNECT %s HTTP/1.1\r\n\r\n",
-        url
-    );
-    send(args.dest,
-        args.dest_buf,
-        strlen(args.dest_buf),
-        MSG_NOSIGNAL
-    );
-    memset(args.dest_buf, '\0', strlen(args.dest_buf));
-    for (
-        short int i = 0, end_i = 39;
-        (i = recv(args.dest, args.dest_buf, end_i, 0)) != end_i && i > 0;
-        end_i -= i
-    ) continue;
-    if (! strstr(args.dest_buf, "\r\n\r\n"))
-    {
-        fprintf(stderr, "Connection is not established: %s\n", url);
-        shutdown(args.dest, SHUT_RDWR);
-        close(args.dest);
-        goto exit_label;
-    }
-    if (https)
-        send(
-            args.src,
-            args.dest_buf,
-            strlen(args.dest_buf),
-            MSG_NOSIGNAL
-        );
-    else
-        send(
-            args.dest,
-            args.src_buf,
-            total,
-            MSG_NOSIGNAL
-        );
-
-    _client = (struct sock_argu *) malloc(sizeof(struct sock_argu));
-    _server = (struct sock_argu *) malloc(sizeof(struct sock_argu));
-
-    if (! _client || ! _server)
-    {
-        free(_client);
-        free(_server);
-        close(args.dest);
-        goto exit_label;
-    }
-
-    memset(_client, '\0', sizeof(struct sock_argu));
-    memset(_server, '\0', sizeof(struct sock_argu));
-
-    _client->src = args.src;
-    _client->src_buf = args.src_buf;
-    _client->dest = args.dest;
-    _client->dest_buf = args.dest_buf;
-    _server->src = _client->dest;
-    _server->src_buf = _client->dest_buf;
-    _server->dest = _client->src;
-    _server->dest_buf = _client->src_buf;
-
-    pthread_create(&t1, NULL, swap_data, _client);
-    pthread_create(&t2, NULL, swap_data, _server);
-
-    pthread_join(t2, NULL);
-    pthread_join(t1, NULL);
-
-    shutdown(args.dest, SHUT_RDWR);
-    close(args.dest);
-
-exit_label:
-    close(args.src);
-    free(_fd);
-    free(args.src_buf);
-    free(args.dest_buf);
-    free(url);
-    args.src_buf = args.dest_buf = url = NULL;
-    pthread_exit(NULL);
-    return NULL;
-}
-
-void *swap_data(void *par)
-{
-    struct sock_argu *arg_ = (struct sock_argu *) par;
-    memset(arg_->src_buf, '\0', SIZE);
-
-    for (long int n = 0; (n = recv(arg_->src, arg_->src_buf, SIZE, 0)); )
-    {
-        if (n < 0)
-        {
-            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
-                continue;
-            else
-                break;
-        }
-        send(arg_->dest, arg_->src_buf, n, MSG_NOSIGNAL);
-
-        memset(arg_->src_buf, '\0', n);
-    }
-
-    shutdown(arg_->src, SHUT_RDWR);
-    shutdown(arg_->dest, SHUT_RDWR);
-    free(par);
-    pthread_exit(NULL);
-    return NULL;
-}
-
 int setNonBlocking(int sockfd)
 {
     int flags = fcntl(sockfd, F_GETFL, 0);

@@ -86,6 +86,7 @@ int main(int argc, char **argv) {
         close(local_fd);
         exit(EXIT_FAILURE);
     }
+    setNonBlocking(local_fd);
     printf(
         __TIME__ "\t" __DATE__ "\n"
         "Listen on %s:%u.\n",
