@@ -1,0 +1,2 @@
+pytest # python 测试
+requests # http 客户端

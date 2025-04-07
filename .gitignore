@@ -1,1 +1,6 @@
-thread_socket
+.vscode
+.venv
+__pycache__
+.pytest_cache
+logs
+.DS_Store

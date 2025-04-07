@@ -1,0 +1,4 @@
+httptools # 解析 http 请求
+trio # 创建 跨平台的 多路IO 复用 TCP 服务端
+loguru # 异步日志
+typer # 命令行解析
