@@ -28,15 +28,16 @@
 extern pthread_attr_t attr;
 extern int LOG;
 extern int local_fd;
-extern char ip[16];
+extern struct sockaddr_in server_addr;
 extern atomic_bool SHUTDOWN;
 
 struct server_argu
 {
-    int src;
-    int dst;
+    int32_t src;
+    int32_t dst;
     char *msg;
     char *http_msg;
+    uint32_t http_msg_len;
 };
 
 int setNonBlocking(int);
@@ -47,5 +48,11 @@ void usage(const char *, int);
 void signal_terminate(int);
 void *handle_server(void *);
 void *handle_swap(void *);
+extern inline void define_event(
+    int32_t epoll_fd,
+    struct epoll_event *event,
+    int32_t src,
+    int32_t dst
+);
 
 #endif

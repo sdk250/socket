@@ -2,7 +2,7 @@
 
 void signal_terminate(const int sign)
 {
-    atomic_store_explicit(&SHUTDOWN, true, memory_order_relaxed);
+    atomic_store_explicit(&SHUTDOWN, true, memory_order_release);
     fprintf(stderr, "Receive terminated signal: %d\n", sign);
     close(local_fd);
 }
@@ -31,7 +31,7 @@ void *handle_swap(void *arg)
     memset(buf, '\0', sizeof(int32_t));
     struct epoll_event events[MAX_EVENT];
 
-    for (int event_count = 0; !atomic_load(&SHUTDOWN);)
+    for (int event_count = 0; !atomic_load_explicit(&SHUTDOWN, memory_order_relaxed);)
     {
         event_count = epoll_wait(epoll_fd, events, MAX_EVENT, -1);
         for (int i = 0; i < event_count; i++)
@@ -57,9 +57,8 @@ void *handle_swap(void *arg)
                 }
                 if (!_continue || recved == 0)
                 {
-                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, src, NULL);
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, dst, NULL);
-                    close(src);
+                    shutdown(dst, SHUT_RDWR);
                     close(dst);
                 }
             }
@@ -76,7 +75,7 @@ void *handle_server(void *arg)
     memset(buf, '\0', sizeof(int64_t));
     struct epoll_event event, events[MAX_EVENT];
 
-    for (int event_count = 0; !atomic_load(&SHUTDOWN);)
+    for (int event_count = 0; !atomic_load_explicit(&SHUTDOWN, memory_order_relaxed);)
     {
         event_count = epoll_wait(epoll_fd, events, MAX_EVENT, -1);
         for (int i = 0; i < event_count; i++)
@@ -94,14 +93,14 @@ void *handle_server(void *arg)
                     MSG_NOSIGNAL
                 );
 
-                free(server_ptr->msg);
-                server_ptr->msg = NULL;
-
                 memset(&event, '\0', sizeof(struct epoll_event));
                 event.events = EPOLLIN | EPOLLET;
                 event.data.ptr = events[i].data.ptr;
                 events[i].data.ptr = NULL;
                 epoll_ctl(epoll_fd, EPOLL_CTL_MOD, dst, &event);
+
+                free(server_ptr->msg);
+                server_ptr->msg = NULL;
             } else if (events[i].events & EPOLLIN) {
                 for (
                     short int i = 0, end_i = 39;
@@ -110,7 +109,7 @@ void *handle_server(void *arg)
                 ) continue;
                 if (! strstr(buf, "\r\n\r\n"))
                 {
-                    memset(buf, '\0', strlen(buf));
+                    memset(buf, '\0', 39);
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, dst, NULL);
                     shutdown(dst, SHUT_RDWR);
                     close(dst);
@@ -123,36 +122,44 @@ void *handle_server(void *arg)
                     send(
                         src,
                         buf,
-                        strlen(buf),
+                        39,
                         MSG_NOSIGNAL
                     );
-                else
+                else {
                     send(
                         dst,
                         server_ptr->http_msg,
-                        strlen(server_ptr->http_msg),
+                        server_ptr->http_msg_len,
                         MSG_NOSIGNAL
                     );
-                memset(buf, '\0', strlen(buf));
+                    free(server_ptr->http_msg);
+                    server_ptr->http_msg = NULL;
+                }
+                memset(buf, '\0', 39);
                 epoll_ctl(epoll_fd, EPOLL_CTL_DEL, dst, NULL);
                 free(server_ptr);
+                events[i].data.ptr = NULL;
 
-                memset(&event, '\0', sizeof(struct epoll_event));
-                *(int32_t *) &event.data.u64 = src;
-                *(((int32_t *) &event.data.u64) + 1) = dst;
-                event.events = EPOLLIN | EPOLLET;
-                epoll_ctl(swap_epoll_fd, EPOLL_CTL_ADD, src, &event);
-
-                memset(&event, '\0', sizeof(struct epoll_event));
-                *(int32_t *) &event.data.u64 = dst;
-                *(((int32_t *) &event.data.u64) + 1) = src;
-                event.events = EPOLLIN | EPOLLET;
-                epoll_ctl(swap_epoll_fd, EPOLL_CTL_ADD, dst, &event);
+                define_event(swap_epoll_fd, &event, src, dst);
+                define_event(swap_epoll_fd, &event, dst, src);
             }
         }
     }
     pthread_exit(NULL);
     return NULL;
+}
+inline void define_event(
+    int32_t epoll_fd,
+    struct epoll_event *event,
+    int32_t src,
+    int32_t dst
+)
+{
+    memset(event, '\0', sizeof(struct epoll_event));
+    *(int32_t *) &(event->data) = src;
+    *(((int32_t *) &(event->data)) + 1) = dst;
+    event->events = EPOLLIN | EPOLLET;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, src, event);
 }
 void main_loop(const int local_fd)
 {
@@ -178,12 +185,11 @@ void main_loop(const int local_fd)
     pthread_t tid_swap, tid_server;
     pthread_create(&tid_swap, &attr, handle_swap, thread_buf_swap);
     pthread_create(&tid_server, &attr, handle_server, thread_buf_server);
-    // pthread_detach(tid_swap);
 
     event.events = EPOLLIN;
     event.data.fd = local_fd;
     epoll_ctl(epoll_fd, EPOLL_CTL_ADD, local_fd, &event);
-    for (; !atomic_load(&SHUTDOWN);)
+    for (; !atomic_load_explicit(&SHUTDOWN, memory_order_relaxed);)
     {
         event_count = epoll_wait(epoll_fd, events, MAX_EVENT, -1);
         for (int i = 0; i < event_count; i++)
@@ -200,8 +206,8 @@ void main_loop(const int local_fd)
                 event.data.fd = _fd;
                 epoll_ctl(epoll_fd, EPOLL_CTL_ADD, _fd, &event);
             } else if (events[i].events & EPOLLIN) {
-                int total = 0, https = 0, dst = 0;
-                struct sockaddr_in server_addr, destination_addr;
+                int32_t total = 0, https = 0, dst = 0;
+                struct sockaddr_in destination_addr;
                 socklen_t len = sizeof(struct sockaddr);
 
                 memset(&destination_addr, '\0', sizeof(struct sockaddr));
@@ -231,14 +237,14 @@ void main_loop(const int local_fd)
                         else
                             total += ret;
                     }
-    
+
                     for (char *p = buf; (uintptr_t) p != 1 && p - buf < SIZE; p++)
                     {
                         if (sscanf(p, "Host: %" LEN_URL_STR "[^ \r\n]\r\n", url) == 1 ||
                             sscanf(p, "host: %" LEN_URL_STR "[^ \r\n]\r\n", url) == 1
                         )
                             break;
-    
+
                         p = strchr(p, '\n');
                     }
                     if (*url == 0)
@@ -246,9 +252,8 @@ void main_loop(const int local_fd)
                         if (sscanf(buf, "CONNECT %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
                             if (sscanf(buf, "GET %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
                                 if (sscanf(buf, "POST %" LEN_URL_STR "[^ ] %*[^ ]\r\n", url) != 1) {
-                                    perror("Unknown connection.");
-                                    memset(buf, '\0', strlen(buf));
-                                    memset(url, '\0', strlen(url));
+                                    if (LOG) fprintf(stderr, "Unknown connection.\n");
+                                    memset(buf, '\0', total);
                                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
                                     close(fd);
                                     continue;
@@ -276,8 +281,6 @@ void main_loop(const int local_fd)
                     if (! inet_ntop(AF_INET, &destination_addr.sin_addr, url, INET_ADDRSTRLEN))
                     {
                         perror("Translation fail");
-                        memset(buf, '\0', strlen(buf));
-                        memset(url, '\0', strlen(url));
                         epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
                         close(fd);
                         continue;
@@ -286,8 +289,7 @@ void main_loop(const int local_fd)
                     if (len + 7 > LEN_URL)
                     {
                         fprintf(stderr, "URI is too long: %s\n", url);
-                        memset(buf, '\0', strlen(buf));
-                        memset(url, '\0', strlen(url));
+                        memset(url, '\0', len);
                         epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
                         close(fd);
                         continue;
@@ -302,11 +304,10 @@ void main_loop(const int local_fd)
 
                 if (LOG) printf("url: %s\n", url);
 
-                memset(&server_addr, '\0', sizeof(struct sockaddr));
                 if ((dst = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
                 {
                     perror("Create socket for zl");
-                    memset(buf, '\0', strlen(buf));
+                    memset(buf, '\0', total);
                     memset(url, '\0', strlen(url));
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
                     close(fd);
@@ -315,19 +316,6 @@ void main_loop(const int local_fd)
                 setNonBlocking(dst);
                 set_socket_timeout(dst, 0, TIMEOUT);
 
-                server_addr.sin_family = AF_INET;
-                server_addr.sin_port = htons(443);
-                if (inet_pton(AF_INET, ip, &server_addr.sin_addr) != 1)
-                {
-                    perror("Translation address failed");
-                    close(dst);
-                    memset(buf, '\0', strlen(buf));
-                    memset(url, '\0', strlen(url));
-                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
-                    close(fd);
-                    continue;
-                }
-
                 if (connect(
                     dst,
                     (struct sockaddr *) &server_addr,
@@ -335,7 +323,7 @@ void main_loop(const int local_fd)
                 ) {
                     perror("Connect to server fail");
                     close(dst);
-                    memset(buf, '\0', strlen(buf));
+                    memset(buf, '\0', total);
                     memset(url, '\0', strlen(url));
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
                     close(fd);
@@ -354,7 +342,7 @@ void main_loop(const int local_fd)
                 {
                     perror("calloc");
                     close(dst);
-                    memset(buf, '\0', strlen(buf));
+                    memset(buf, '\0', total);
                     memset(_buf, '\0', strlen(_buf));
                     memset(url, '\0', strlen(url));
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
@@ -365,10 +353,25 @@ void main_loop(const int local_fd)
                 ((struct server_argu *) event.data.ptr)->dst = dst;
                 ((struct server_argu *) event.data.ptr)->msg = strdup(_buf);
                 if (!https)
-                    ((struct server_argu *) event.data.ptr)->http_msg = strdup(buf);
+                {
+                    ((struct server_argu *) event.data.ptr)->http_msg = calloc(SIZE, sizeof(char));
+                    if (((struct server_argu *) event.data.ptr)->http_msg == NULL)
+                    {
+                        perror("calloc");
+                        close(dst);
+                        memset(buf, '\0', total);
+                        memset(_buf, '\0', strlen(_buf));
+                        memset(url, '\0', strlen(url));
+                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+                        close(fd);
+                        continue;
+                    }
+                    memcpy(((struct server_argu *) event.data.ptr)->http_msg, buf, total);
+                    ((struct server_argu *) event.data.ptr)->http_msg_len = total;
+                }
                 epoll_ctl(server_epoll_fd, EPOLL_CTL_ADD, dst, &event);
 
-                memset(buf, '\0', strlen(buf));
+                memset(buf, '\0', total);
                 memset(_buf, '\0', strlen(_buf));
                 memset(url, '\0', strlen(url));
                 epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);

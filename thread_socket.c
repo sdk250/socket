@@ -3,7 +3,7 @@
 pthread_attr_t attr = {0};
 int LOG = 0;
 int local_fd = 0;
-char ip[16] = {0};
+struct sockaddr_in server_addr = {0};
 atomic_bool SHUTDOWN = false;
 
 int main(int argc, char **argv) {
@@ -14,6 +14,7 @@ int main(int argc, char **argv) {
     unsigned int port = 8080;
     pid_t pid = 0;
     pid_t sid = 0;
+    char ip_s[16] = {0};
 
     if (argc == 1)
         usage(*argv, EXIT_FAILURE);
@@ -33,7 +34,7 @@ int main(int argc, char **argv) {
                     perror("Setuid error");
                 break;
             case 'r':
-                strncpy(ip, optarg, 15);
+                strncpy(ip_s, optarg, 15);
                 break;
             case 'h':
                 usage(*argv, EXIT_SUCCESS);
@@ -50,8 +51,18 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (*ip == '\0')
-        strncpy(ip, SERVER_ADDR, 15);
+    if (*ip_s == '\0')
+        strncpy(ip_s, SERVER_ADDR, 15);
+
+    memset(&server_addr, '\0', sizeof(struct sockaddr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(443);
+    if (inet_pton(AF_INET, ip_s, &server_addr.sin_addr) != 1)
+    {
+        perror("Translation address failed");
+        exit(EXIT_FAILURE);
+    }
+
     signal(SIGPIPE, SIG_IGN);
     signal(SIGALRM, SIG_IGN);
     signal(SIGINT, signal_terminate);
