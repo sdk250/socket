@@ -38,13 +38,13 @@ void *handle_swap(void *arg)
         {
             if (events[i].events & EPOLLIN)
             {
-                int32_t src = *(int32_t *) &events[i].data.u64;
-                int32_t dst = *(((int32_t *) &events[i].data.u64) + 1);
+                int32_t *src = (int32_t *) &events[i].data.u64;
+                int32_t *dst = src + 1;
                 bool _continue = false;
 
                 int recved = 0;
                 for (;
-                    (recved = recv(src, buf, SIZE, 0));
+                    (recved = recv(*src, buf, SIZE, 0));
                 )
                 {
                     if (recved < 0)
@@ -52,14 +52,20 @@ void *handle_swap(void *arg)
                         _continue = (errno == EAGAIN || errno == EWOULDBLOCK);
                         break;
                     }
-                    send(dst, buf, recved, MSG_NOSIGNAL);
+                    send(*dst, buf, recved, MSG_NOSIGNAL);
                     memset(buf, '\0', recved);
                 }
                 if (!_continue || recved == 0)
                 {
-                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, dst, NULL);
-                    shutdown(dst, SHUT_RDWR);
-                    close(dst);
+                    for (int i = 0; i < 2; i++)
+                    {
+                        if (*(src + i) != 0)
+                        {
+                            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, *(src + i), NULL);
+                            close(*(src + i));
+                            *(src + i) = 0;
+                        }
+                    }
                 }
             }
         }
@@ -354,7 +360,7 @@ void main_loop(const int local_fd)
                 ((struct server_argu *) event.data.ptr)->msg = strdup(_buf);
                 if (!https)
                 {
-                    ((struct server_argu *) event.data.ptr)->http_msg = calloc(SIZE, sizeof(char));
+                    ((struct server_argu *) event.data.ptr)->http_msg = calloc(total + 1, sizeof(char));
                     if (((struct server_argu *) event.data.ptr)->http_msg == NULL)
                     {
                         perror("calloc");

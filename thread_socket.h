@@ -22,7 +22,7 @@
 #define U_TIMEOUT 500000
 #define TIMEOUT 3
 #define SERVER_ADDR "110.242.70.68"
-#define READ_SIZE 0xFF
+#define READ_SIZE 0x100
 #define MAX_EVENT (64)
 
 extern pthread_attr_t attr;
