@@ -73,6 +73,8 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
     setsockopt(local_fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+    on = 1;
+    setsockopt(local_fd, SOL_IP, IP_TRANSPARENT, &on, sizeof(on));
     memset(&local_addr, '\0', sizeof(struct sockaddr));
     local_addr.sin_family = AF_INET;
     local_addr.sin_port = htons(port);
