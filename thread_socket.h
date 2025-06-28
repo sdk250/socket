@@ -23,7 +23,6 @@
 #define TIMEOUT 3
 #define SERVER_ADDR "110.242.70.68"
 #define READ_SIZE 0x100
-#define MAX_EVENT (64)
 
 extern pthread_attr_t attr;
 extern int LOG;
@@ -48,11 +47,5 @@ void usage(const char *, int);
 void signal_terminate(int);
 void *handle_server(void *);
 void *handle_swap(void *);
-extern inline void define_event(
-    int32_t epoll_fd,
-    struct epoll_event *event,
-    int32_t src,
-    int32_t dst
-);
 
 #endif

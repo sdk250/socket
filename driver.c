@@ -1,9 +1,17 @@
+#include <sys/time.h>
+
 #include "thread_socket.h"
+
+#define MAX_EVENT (128)
+
+static pthread_t tid_swap = 0, tid_server = 0;
 
 void signal_terminate(const int sign)
 {
     atomic_store_explicit(&SHUTDOWN, true, memory_order_release);
     fprintf(stderr, "Receive terminated signal: %d\n", sign);
+    pthread_join(tid_swap, NULL);
+    pthread_join(tid_server, NULL);
     close(local_fd);
 }
 
@@ -24,17 +32,32 @@ void usage(const char *argv, const int ret)
     exit(ret);
 }
 
+inline void define_event(
+    int32_t epoll_fd,
+    struct epoll_event *event,
+    int32_t src,
+    int32_t dst
+)
+{
+    memset(event, '\0', sizeof(struct epoll_event));
+    *(int32_t *) &(event->data) = src;
+    *(((int32_t *) &(event->data)) + 1) = dst;
+    event->events = EPOLLIN | EPOLLET;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, src, event);
+}
 void *handle_swap(void *arg)
 {
     int32_t epoll_fd = *(int32_t *) arg;
-    char *buf = (char *) arg;
-    memset(buf, '\0', sizeof(int32_t));
-    struct epoll_event events[MAX_EVENT];
+    memset(arg, '\0', sizeof(int32_t));
 
-    for (int event_count = 0; !atomic_load_explicit(&SHUTDOWN, memory_order_relaxed);)
+    char *buf = (char *) arg;
+    struct epoll_event events[MAX_EVENT * 2];
+    memset(events, '\0', sizeof(events));
+
+    for (int32_t event_count = 0; ! atomic_load_explicit(&SHUTDOWN, memory_order_acquire); )
     {
         event_count = epoll_wait(epoll_fd, events, MAX_EVENT, -1);
-        for (int i = 0; i < event_count; i++)
+        for (int32_t i = 0; i < event_count; i++)
         {
             if (events[i].events & EPOLLIN)
             {
@@ -55,36 +78,37 @@ void *handle_swap(void *arg)
                     send(*dst, buf, recved, MSG_NOSIGNAL);
                     memset(buf, '\0', recved);
                 }
-                if (!_continue || recved == 0)
+                if (! _continue || recved == 0)
                 {
-                    for (int i = 0; i < 2; i++)
+                    if (*src != 0)
                     {
-                        if (*(src + i) != 0)
-                        {
-                            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, *(src + i), NULL);
-                            close(*(src + i));
-                            *(src + i) = 0;
-                        }
+                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, *src, NULL);
+                        close(*src);
+                        *src = 0;
                     }
                 }
             }
         }
     }
+
     pthread_exit(NULL);
     return NULL;
 }
 void *handle_server(void *arg)
 {
     int32_t epoll_fd = *(int32_t *) arg;
-    int32_t swap_epoll_fd = *(((int32_t *) arg) + 1);
-    char *buf = (char *) arg;
-    memset(buf, '\0', sizeof(int64_t));
-    struct epoll_event event, events[MAX_EVENT];
+    int32_t epoll_fd_swap = *(((int32_t *) arg) + 1);
+    memset(arg, '\0', sizeof(int64_t));
 
-    for (int event_count = 0; !atomic_load_explicit(&SHUTDOWN, memory_order_relaxed);)
+    char *buf = (char *) arg;
+    struct epoll_event event, events[MAX_EVENT];
+    memset(&event, '\0', sizeof(event));
+    memset(events, '\0', sizeof(events));
+
+    for (int32_t event_count = 0; ! atomic_load_explicit(&SHUTDOWN, memory_order_acquire); )
     {
         event_count = epoll_wait(epoll_fd, events, MAX_EVENT, -1);
-        for (int i = 0; i < event_count; i++)
+        for (int32_t i = 0; i < event_count; i++)
         {
             struct server_argu *server_ptr = (struct server_argu *) events[i].data.ptr;
             int32_t src = server_ptr->src;
@@ -107,16 +131,21 @@ void *handle_server(void *arg)
 
                 free(server_ptr->msg);
                 server_ptr->msg = NULL;
-            } else if (events[i].events & EPOLLIN) {
+            }
+            else if (events[i].events & EPOLLIN)
+            {
+                const uint8_t RSP_LEN = 39;
                 for (
-                    short int i = 0, end_i = 39;
+                    int8_t i = 0, end_i = RSP_LEN;
                     (i = recv(dst, buf, end_i, 0)) != end_i && i > 0;
                     end_i -= i
                 ) continue;
+
                 if (! strstr(buf, "\r\n\r\n"))
                 {
-                    memset(buf, '\0', 39);
+                    memset(buf, '\0', RSP_LEN);
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, dst, NULL);
+                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, src, NULL);
                     shutdown(dst, SHUT_RDWR);
                     close(dst);
                     close(src);
@@ -128,10 +157,11 @@ void *handle_server(void *arg)
                     send(
                         src,
                         buf,
-                        39,
+                        RSP_LEN,
                         MSG_NOSIGNAL
                     );
-                else {
+                else
+                {
                     send(
                         dst,
                         server_ptr->http_msg,
@@ -140,41 +170,31 @@ void *handle_server(void *arg)
                     );
                     free(server_ptr->http_msg);
                     server_ptr->http_msg = NULL;
+                    server_ptr->http_msg_len = 0;
                 }
-                memset(buf, '\0', 39);
+                memset(buf, '\0', RSP_LEN);
                 epoll_ctl(epoll_fd, EPOLL_CTL_DEL, dst, NULL);
                 free(server_ptr);
                 events[i].data.ptr = NULL;
 
-                define_event(swap_epoll_fd, &event, src, dst);
-                define_event(swap_epoll_fd, &event, dst, src);
+                define_event(epoll_fd_swap, &event, src, dst);
+                define_event(epoll_fd_swap, &event, dst, src);
             }
         }
     }
+
     pthread_exit(NULL);
     return NULL;
 }
-inline void define_event(
-    int32_t epoll_fd,
-    struct epoll_event *event,
-    int32_t src,
-    int32_t dst
-)
-{
-    memset(event, '\0', sizeof(struct epoll_event));
-    *(int32_t *) &(event->data) = src;
-    *(((int32_t *) &(event->data)) + 1) = dst;
-    event->events = EPOLLIN | EPOLLET;
-    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, src, event);
-}
+
 void main_loop(const int local_fd)
 {
-    int epoll_fd, event_count;
+    int32_t epoll_fd = 0, event_count = 0;
     struct epoll_event event, events[MAX_EVENT];
     char *thread_buf_swap = calloc(SIZE, sizeof(char));
     char *thread_buf_server = calloc(SIZE, sizeof(char));
     char *buf = calloc(SIZE, sizeof(char));
-    char *_buf = calloc(SIZE, sizeof(char));
+    char *_buf = calloc(LEN_URL, sizeof(char));
     char *url = calloc(LEN_URL, sizeof(char));
     if (! thread_buf_swap || ! buf || ! _buf || ! thread_buf_server || ! url)
     {
@@ -188,19 +208,18 @@ void main_loop(const int local_fd)
     *(int32_t *) thread_buf_swap = swap_epoll_fd;
     *(int32_t *) thread_buf_server = server_epoll_fd;
     *(((int32_t *) thread_buf_server) + 1) = swap_epoll_fd;
-    pthread_t tid_swap, tid_server;
     pthread_create(&tid_swap, &attr, handle_swap, thread_buf_swap);
     pthread_create(&tid_server, &attr, handle_server, thread_buf_server);
 
     event.events = EPOLLIN;
     event.data.fd = local_fd;
     epoll_ctl(epoll_fd, EPOLL_CTL_ADD, local_fd, &event);
-    for (; !atomic_load_explicit(&SHUTDOWN, memory_order_relaxed);)
+    for (; ! atomic_load_explicit(&SHUTDOWN, memory_order_acquire); )
     {
         event_count = epoll_wait(epoll_fd, events, MAX_EVENT, -1);
-        for (int i = 0; i < event_count; i++)
+        for (int32_t i = 0; i < event_count; i++)
         {
-            int fd = events[i].data.fd;
+            int32_t fd = events[i].data.fd;
             if (fd == local_fd)
             {
                 int _fd = accept(fd, NULL, NULL);
@@ -211,7 +230,9 @@ void main_loop(const int local_fd)
                 event.events = EPOLLIN | EPOLLET;
                 event.data.fd = _fd;
                 epoll_ctl(epoll_fd, EPOLL_CTL_ADD, _fd, &event);
-            } else if (events[i].events & EPOLLIN) {
+            }
+            else if (events[i].events & EPOLLIN)
+            {
                 int32_t total = 0, https = 0, dst = 0;
                 struct sockaddr_in destination_addr;
                 socklen_t len = sizeof(struct sockaddr);
@@ -231,11 +252,13 @@ void main_loop(const int local_fd)
                     (ntohl(destination_addr.sin_addr.s_addr) & 0xff000000) == 0x7f000000 || // 127.0.0.0/8
                     (ntohl(destination_addr.sin_addr.s_addr) & 0xffff0000) == 0xa9fe0000 || // 169.254.0.0/16
                     (ntohl(destination_addr.sin_addr.s_addr) & 0xf0000000) == 0xe0000000 // 224.0.0.0/4
-                )) {
-                    for (short int ret = 0;
-                        total + READ_SIZE < SIZE &&
-                        ! strstr(buf, "\r\n\r\n") &&
-                        (ret = recv(fd, buf + total, READ_SIZE, 0));
+                ))
+                {
+                    for (
+                        int32_t ret = 0;
+                        total + READ_SIZE < SIZE
+                        && ! strstr(buf, "\r\n\r\n")
+                        && (ret = recv(fd, buf + total, READ_SIZE, 0));
                     )
                     {
                         if (ret == -1)
@@ -276,14 +299,17 @@ void main_loop(const int local_fd)
                             break;
                         }
                     }
-                    if (!strchr(url, ':'))
+                    if (! strchr(url, ':'))
                     {
                         if (https)
                             strncat(url, ":443", LEN_URL);
                         else
                             strncat(url, ":80", LEN_URL);
                     }
-                } else {
+                }
+                // Found transparent IP
+                else
+                {
                     if (! inet_ntop(AF_INET, &destination_addr.sin_addr, url, INET_ADDRSTRLEN))
                     {
                         perror("Translation fail");
@@ -343,7 +369,7 @@ void main_loop(const int local_fd)
                 );
                 memset(&event, '\0', sizeof(struct epoll_event));
                 event.events = EPOLLOUT | EPOLLET;
-                event.data.ptr = calloc(1, sizeof(struct server_argu));
+                event.data.ptr = calloc(sizeof(char), sizeof(struct server_argu));
                 if (event.data.ptr == NULL)
                 {
                     perror("calloc");
@@ -355,13 +381,16 @@ void main_loop(const int local_fd)
                     close(fd);
                     continue;
                 }
-                ((struct server_argu *) event.data.ptr)->src = fd;
-                ((struct server_argu *) event.data.ptr)->dst = dst;
-                ((struct server_argu *) event.data.ptr)->msg = strdup(_buf);
-                if (!https)
+
+                struct server_argu *argu = (struct server_argu *) event.data.ptr;
+                argu->src = fd;
+                argu->dst = dst;
+                argu->msg = strdup(_buf);
+
+                if (! https)
                 {
-                    ((struct server_argu *) event.data.ptr)->http_msg = calloc(total + 1, sizeof(char));
-                    if (((struct server_argu *) event.data.ptr)->http_msg == NULL)
+                    argu->http_msg = calloc(sizeof(char), total + 1);
+                    if (argu->http_msg == NULL)
                     {
                         perror("calloc");
                         close(dst);
@@ -372,8 +401,8 @@ void main_loop(const int local_fd)
                         close(fd);
                         continue;
                     }
-                    memcpy(((struct server_argu *) event.data.ptr)->http_msg, buf, total);
-                    ((struct server_argu *) event.data.ptr)->http_msg_len = total;
+                    memcpy(argu->http_msg, buf, total);
+                    argu->http_msg_len = total;
                 }
                 epoll_ctl(server_epoll_fd, EPOLL_CTL_ADD, dst, &event);
 
