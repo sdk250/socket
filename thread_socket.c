@@ -94,7 +94,7 @@ int main(int argc, char **argv) {
         close(local_fd);
         exit(EXIT_FAILURE);
     }
-    if (listen(local_fd, 50) < 0) {
+    if (listen(local_fd, MAX_EVENT) < 0) {
         perror("listen");
         close(local_fd);
         exit(EXIT_FAILURE);
