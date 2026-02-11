@@ -1,13 +1,14 @@
 CFLAGS = -m64 -O3 -Wall -lc -fPIE
+NAME = esocket
 
-thread_socket:
+esocket:
 	clang $(CFLAGS) -o $(@) thread_socket.c driver.c sniff_host.c ring_buffer.c
 
 clean:
-	rm ./thread_socket
+	rm ./$(NAME)
 
 install:
-	cp -f ./thread_socket /usr/bin 
+	cp -f ./$(NAME) /usr/bin 
 
 uninstall:
-	rm -f /usr/bin/thread_socket
+	rm -f /usr/bin/$(NAME)
