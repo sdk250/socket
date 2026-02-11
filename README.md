@@ -1,23 +1,28 @@
 # 成品脚本
+
 [MLKit](https://github.com/sdk250/MLKit)
+
 # 介绍
-这是一个`专门`用于百度直连的http轻量代理<br>
-~使用多线程编写，本身编译出来极为轻量~<br>
-更改程序执行逻辑，从 `多线程` 转至 `epoll多路复用` 。大幅度的降低了程序在高并发的情况下的内存占用  
-修改`用于连接的IP`在`thread_socket.h`中的宏定义`SERVER_ADDR`，将它修改为你想使用的百度直连IP，然后重新编译即可。<br>
-亦或者运行时加上 `-r` 参数来指定<br>
+
+这是一个 **`专门`** 用于百度直连的http轻量代理
+
 # Compile
+
 ```shell
 make
 ```
+
 If it is not working, please try:
+
 ```shell
-clang -m64 -O3 -Wall -lpthread -o thread_socket thread_socket.c driver.c
+clang -m64 -O3 -Wall -lc -o esocket thread_socket.c driver.c
 ```
+
 # Usage
+
 ```shell
-./thread_socket -h
-Usage of ./thread_socket:
+./esocket -h
+Usage of ./esocket:
         -p      <PORT>
                 Set PORT while running
         -l      Show running log
@@ -27,10 +32,15 @@ Usage of ./thread_socket:
                 Set IP of peer
         -d      Start daemon service
         -h      Show this message
-```
-编译以后可以在任意终端上运行，比如安卓的Termux<br>
-使用的最直接的使用方法就是运行后在手机的APN设置里面设置代理:<br>
-127.0.0.1 端口 默认为8080
-# Email
-` hexfya@gmail.com `
 
+# 基本使用方法
+./esocket -p 8080 -l -r 14.215.182.75
+
+curl -vx 'http://127.0.0.1:8080' 'https://4.ipw.cn/'
+```
+
+程序本体仅依赖标准C库，所以理论上可以在任意标准Linux环境中使用，Android推荐 [Termux](https://github.com/termux/termux-app)
+
+`esocket` 的能够接受标准 `HTTP代理协议` ，以及来自 `TPROXY` 转发的流量。
+
+在 Android 中快速使用 HTTP代理的方法可以通过自带的APN设置，但是跳点会很大。
