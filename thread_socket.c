@@ -1,25 +1,28 @@
+#include <getopt.h>
+
 #include "thread_socket.h"
 
-pthread_attr_t attr = {0};
-int LOG = 0;
-int local_fd = 0;
-struct sockaddr_in server_addr = {0};
+int32_t LOG = 0;
+int32_t LOCAL_FD = 0;
+struct sockaddr_in server_addr = { 0 };
 atomic_bool SHUTDOWN = false;
 
-int main(int argc, char **argv) {
-    struct sockaddr_in local_addr = {0};
-    int on = 1;
+int main(int argc, char *const *argv)
+{
+    struct sockaddr_in local_addr = { 0 };
     int opt = 0;
     int daemon = 0;
     unsigned int port = 8080;
     pid_t pid = 0;
     pid_t sid = 0;
-    char ip_s[16] = {0};
+    char ip_s[16] = { 0 };
 
     if (argc == 1)
         usage(*argv, EXIT_FAILURE);
-    for (;(opt = getopt(argc, argv, "p:u:r:dlh")) != -1;) {
-        switch(opt) {
+    for (; (opt = getopt(argc, argv, "p:u:r:dlh")) != -1; )
+    {
+        switch(opt)
+        {
             case 'p':
                 port = atoi(optarg);
                 break;
@@ -51,6 +54,7 @@ int main(int argc, char **argv) {
         }
     }
 
+    // 未指定 Server 时，使用默认
     if (*ip_s == '\0')
         strncpy(ip_s, SERVER_ADDR, 15);
 
@@ -63,27 +67,35 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
+    // 捕获发送中断、程序停止等信号
     signal(SIGPIPE, SIG_IGN);
     signal(SIGALRM, SIG_IGN);
     signal(SIGINT, signal_terminate);
     signal(SIGTERM, signal_terminate);
-    if ((local_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
-        perror("Create local server socket file descriptor fail");
-        close(local_fd);
+
+    if ((LOCAL_FD = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
+    {
+        perror("Failed to create local server socket file descriptor");
+        close(LOCAL_FD);
         exit(EXIT_FAILURE);
     }
-    setsockopt(local_fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
-    on = 1;
-    setsockopt(local_fd, SOL_IP, IP_TRANSPARENT, &on, sizeof(on));
+
+    int on = 1;
+    // 端口复用
+    setsockopt(LOCAL_FD, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+    // 接收来自 TPROXY 的流量
+    setsockopt(LOCAL_FD, SOL_IP, IP_TRANSPARENT, &on, sizeof(on));
+
     memset(&local_addr, '\0', sizeof(struct sockaddr));
     local_addr.sin_family = AF_INET;
     local_addr.sin_port = htons(port);
     local_addr.sin_addr.s_addr = INADDR_ANY;
     if (bind(
-        local_fd,
+        LOCAL_FD,
         (const struct sockaddr *) &local_addr,
         sizeof(struct sockaddr)
-    ) < 0) {
+    ) < 0)
+    {
         fprintf(
             stderr,
             "Bind %s:%u error",
@@ -91,24 +103,28 @@ int main(int argc, char **argv) {
             port
         );
         perror(" ");
-        close(local_fd);
+        close(LOCAL_FD);
         exit(EXIT_FAILURE);
     }
-    if (listen(local_fd, MAX_EVENT) < 0) {
+    if (listen(LOCAL_FD, MAX_EVENT) < 0)
+    {
         perror("listen");
-        close(local_fd);
+        close(LOCAL_FD);
         exit(EXIT_FAILURE);
     }
-    setNonBlocking(local_fd);
+    if (setNonBlocking(LOCAL_FD) == -1)
+    {
+        perror("Set nonblocking socket");
+        close(LOCAL_FD);
+        exit(EXIT_FAILURE);
+    }
     printf(
         __TIME__ "\t" __DATE__ "\n"
         "Listen on %s:%u.\n",
         inet_ntoa(local_addr.sin_addr),
         port
     );
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 512 * 1024);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
     if (daemon) {
         if ((pid = fork()) == 0) {
             if ((sid = setsid()) < 0) {
@@ -118,13 +134,13 @@ int main(int argc, char **argv) {
             close(STDIN_FILENO);
             close(STDOUT_FILENO);
             // close(STDERR_FILENO);
-            main_loop(local_fd);
+            main_loop(LOCAL_FD);
         } else {
             printf("The PID of %s is %d.\n", *argv, pid);
-            close(local_fd);
+            close(LOCAL_FD);
         }
     } else
-        main_loop(local_fd);
+        main_loop(LOCAL_FD);
 
     return 0;
 }
