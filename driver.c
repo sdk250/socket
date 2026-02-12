@@ -109,7 +109,8 @@ int32_t sniff_host(struct Context *ctx)
     {
         int32_t n = recv(ctx->src, ctx->buf, BUFSIZE, MSG_NOSIGNAL);
         if (n > 0) ctx->data_len += n;
-        else if (n == 0 || errno != EAGAIN) return -1;
+        else if (n < 0 && (errno != EAGAIN || errno != EWOULDBLOCK)) return -1;
+        else return -1;
 
         int32_t ret = 0;
         if ((ret = sniff(ctx->buf, ctx->data_len, &ctx->session->host)) != 0)
@@ -244,38 +245,28 @@ void event_in(struct Context **ctx_p, int32_t epoll_fd)
                     {
                         fprintf(stderr, "RB: capacity=%zu, size=%zu, tail=%zu, head=%zu\n", ctx->rb.capacity, ctx->rb.size, ctx->rb.tail, ctx->rb.head);
                         failure(ctx_p);
-                        break;
+                        return;
                     }
                     ctx->data_len += ret;
                     int32_t written = rb_flush(&ctx->rb, ctx->dst);
-                    if (written > 0)
-                    {
-                        ctx->data_len -= written;
-                        if (! rb_is_empty(&ctx->rb))
-                        {
-                            if (epoll_mod(epoll_fd, ctx->peer, EPOLLOUT) != 0) failure(ctx_p);
-                            if (epoll_mod(epoll_fd, ctx, 0) != 0) failure(ctx_p);
-                            break;
-                        }
-                    } else if (written < 0 && errno == EAGAIN)
-                    {
-                        if (epoll_mod(epoll_fd, ctx->peer, EPOLLOUT) != 0) failure(ctx_p);
-                        if (epoll_mod(epoll_fd, ctx, 0) != 0) failure(ctx_p);
-                        break;
-                    } else failure(ctx_p);
-                } else if (ret < 0)
-                {
-                    if (errno == EAGAIN) break;
+                    if (written > 0) ctx->data_len -= written;
+                    else if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
                     else
                     {
-                        perror("Received");
                         failure(ctx_p);
-                        break;
+                        return;
                     }
+                }
+                else if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
+                else
+                {
+                    perror("Received");
+                    failure(ctx_p);
+                    return;
                 }
             }
 
-            if (rb_is_full(&ctx->rb))
+            if (! rb_is_empty(&ctx->rb))
             {
                 if (epoll_mod(epoll_fd, ctx, 0) != 0) failure(ctx_p);
                 if (epoll_mod(epoll_fd, ctx->peer, EPOLLOUT) != 0) failure(ctx_p);
@@ -319,14 +310,11 @@ void event_out(struct Context **ctx_p, int32_t epoll_fd)
             {
                 int32_t ret = rb_flush(&peer->rb, peer->dst);
                 if (ret > 0) peer->data_len -= ret;
-                else if (ret < 0)
+                else if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
+                else
                 {
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) return;
-                    else
-                    {
-                        failure(ctx_p);
-                        return;
-                    }
+                    failure(ctx_p);
+                    return;
                 }
             }
             if (epoll_mod(epoll_fd, ctx, EPOLLIN) != 0) failure(ctx_p);
